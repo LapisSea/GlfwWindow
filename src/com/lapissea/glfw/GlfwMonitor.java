@@ -1,4 +1,4 @@
-package com.lapissea.glfwwin;
+package com.lapissea.glfw;
 
 import com.lapissea.util.PairM;
 import org.lwjgl.PointerBuffer;

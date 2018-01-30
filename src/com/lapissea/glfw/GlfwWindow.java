@@ -1,4 +1,4 @@
-package com.lapissea.glfwwin;
+package com.lapissea.glfw;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
