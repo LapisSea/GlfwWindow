@@ -5,12 +5,17 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.internal.LinkedTreeMap;
 import com.lapissea.util.TextUtil;
+import com.lapissea.util.event.EventRegistry;
 import com.lapissea.util.event.change.ChangeRegistry;
 import com.lapissea.util.event.change.ChangeRegistryBool;
 import com.lapissea.vec.ChangeRegistryVec2i;
+import com.lapissea.vec.Vec2i;
 import org.jetbrains.annotations.NotNull;
-import org.lwjgl.BufferUtils;
+import org.lwjgl.glfw.GLFWCursorPosCallback;
 import org.lwjgl.glfw.GLFWImage;
+import org.lwjgl.glfw.GLFWKeyCallback;
+import org.lwjgl.glfw.GLFWMouseButtonCallback;
+import org.lwjgl.system.MemoryUtil;
 
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
@@ -42,6 +47,7 @@ public class GlfwWindow{
 		if(!isCreated()&&!isFullScreen()) return;
 		if(e.bool) glfwShowWindow(handle);
 		else glfwHideWindow(handle);
+		if(maximized.get()) glfwMaximizeWindow(handle);
 	});
 	
 	public final ChangeRegistryVec2i size=new ChangeRegistryVec2i(600, 400, e->{
@@ -67,15 +73,29 @@ public class GlfwWindow{
 		}
 	};
 	
+	private final Vec2i restorePos=new Vec2i(), restoreSize=new Vec2i();
 	public final ChangeRegistry<GlfwMonitor> monitor=new ChangeRegistry<GlfwMonitor>(e->{
 		if(!isCreated()) return;
-		
-		glfwSetWindowMonitor(handle, e.object.handle, pos.x(), pos.y(), e.object.bounds.width, e.object.bounds.height, e.object.refreshRate);
+		if(e.object==null) glfwSetWindowMonitor(handle, 0, restorePos.x(), restorePos.y(), restoreSize.x(), restoreSize.y(), 0);
+		else{
+			restorePos.set(pos);
+			restoreSize.set(size);
+			glfwSetWindowMonitor(handle, e.object.handle, pos.x(), pos.y(), e.object.bounds.width, e.object.bounds.height, e.object.refreshRate);
+		}
 	});
 	
+	private final Vec2i               mousePosControl=new Vec2i();
+	public final  ChangeRegistryVec2i mousePos       =new ChangeRegistryVec2i(e->{
+		if(mousePosControl.equals(e.getSource())) return;
+		mousePosControl.set(e.getSource());
+		glfwSetCursorPos(handle, e.getSource().x(), e.getSource().y());
+	});
 	
-	public GlfwWindow(){
-	}
+	public final EventRegistry<GlfwWindow, GlfwKeyboardEvent>  registryKeyboardKey=new EventRegistry<>();
+	public final EventRegistry<GlfwWindow, GlfwMouseEvent>     registryMouseButton=new EventRegistry<>();
+	public final EventRegistry<GlfwWindow, GlfwMouseMoveEvent> registryMouseMove  =new EventRegistry<>();
+	
+	public GlfwWindow(){ }
 	
 	public GlfwWindow init(){
 		return init(true, true);
@@ -91,7 +111,6 @@ public class GlfwWindow{
 			pos.set((int)windowRect.getX(), (int)windowRect.getY());
 			size.set((int)windowRect.getWidth(), (int)windowRect.getHeight());
 		}
-		
 		preInit(resizeable, decorated);
 		
 		
@@ -113,7 +132,7 @@ public class GlfwWindow{
 		glfwWindowHint(GLFW_RESIZABLE, resizeable?GLFW_TRUE:GLFW_FALSE);
 		glfwWindowHint(GLFW_DECORATED, decorated?GLFW_TRUE:GLFW_FALSE);
 		if(isFullScreen()) glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
-		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+		glfwWindowHint(GLFW_VISIBLE, visible.get()?GLFW_TRUE:GLFW_FALSE);
 	}
 	
 	private void initProps(){
@@ -122,8 +141,10 @@ public class GlfwWindow{
 		if(!isFullScreen()){
 			glfwSetWindowPos(handle, pos.x(), pos.y());
 			glfwSetWindowSize(handle, size.x(), size.y());
-			if(maximized.get()) glfwMaximizeWindow(handle);
-			if(visible.get()) glfwShowWindow(handle);
+			if(visible.get()){
+				if(maximized.get()) glfwMaximizeWindow(handle);
+				glfwShowWindow(handle);
+			}
 		}
 		
 		
@@ -139,6 +160,38 @@ public class GlfwWindow{
 			if(window!=handle) return;
 			pos.set(xpos, ypos);
 		});
+		
+		glfwSetKeyCallback(handle, GLFWKeyCallback.create((window, key, scancode, action, mods)->{
+			if(window!=handle) return;
+			GlfwKeyboardEvent.Type type;
+			
+			if(action==GLFW_PRESS) type=GlfwKeyboardEvent.Type.DOWN;
+			else if(action==GLFW_REPEAT) type=GlfwKeyboardEvent.Type.HOLD;
+			else type=GlfwKeyboardEvent.Type.UP;
+			
+			registryKeyboardKey.dispatch(new GlfwKeyboardEvent(this, key, type));
+		}));
+		glfwSetMouseButtonCallback(handle, GLFWMouseButtonCallback.create((window, button, action, mods)->{
+			if(window!=handle) return;
+			
+			GlfwMouseEvent.Type type;
+			if(action==GLFW_PRESS) type=GlfwMouseEvent.Type.DOWN;
+			else if(action==GLFW_REPEAT) type=GlfwMouseEvent.Type.HOLD;
+			else type=GlfwMouseEvent.Type.UP;
+			
+			registryMouseButton.dispatch(new GlfwMouseEvent(this, button, type));
+		}));
+		glfwSetCursorPosCallback(handle, GLFWCursorPosCallback.create((window, xpos, ypos)->{
+			if(window!=handle) return;
+			mousePosControl.set((int)xpos, (int)ypos);
+			Vec2i delta=mousePosControl.clone().sub(mousePos);
+			mousePos.set(mousePosControl);
+			registryMouseMove.dispatch(new GlfwMouseMoveEvent(this, delta, mousePos));
+		}));
+	}
+	
+	public boolean isKeyDown(int key){
+		return glfwGetKey(handle, GLFW_KEY_V)==GLFW_TRUE;
 	}
 	
 	public GlfwWindow setUserPointer(long pointer){
@@ -162,22 +215,7 @@ public class GlfwWindow{
 	}
 	
 	public static GLFWImage imgToGlfw(BufferedImage image){
-		
-		ByteBuffer buffer=BufferUtils.createByteBuffer(image.getWidth()*image.getHeight()*4);
-		
-		for(int i=0;i<image.getHeight();i++){
-			for(int j=0;j<image.getWidth();j++){
-				int colorSpace=image.getRGB(j, i);
-				buffer.put((byte)((colorSpace>>16)&0xFF));
-				buffer.put((byte)((colorSpace>>8)&0xFF));
-				buffer.put((byte)((colorSpace>>0)&0xFF));
-				buffer.put((byte)((colorSpace>>24)&0xFF));
-			}
-		}
-		
-		buffer.flip();
-		
-		return GLFWImage.create().set(image.getWidth(), image.getHeight(), buffer);
+		return GLFWImage.create().set(image.getWidth(), image.getHeight(), BuffUtil.imageToBuffer(image, memAlloc(image.getWidth()*image.getHeight()*4)));
 	}
 	
 	public boolean isCreated(){
@@ -209,12 +247,8 @@ public class GlfwWindow{
 	}
 	
 	
-	public boolean isHidden(){
-		return !isVisible();
-	}
-	
 	public boolean isVisible(){
-		return visible.get();
+		return visible.get()&&size.x()!=0&&size.y()!=0;
 	}
 	
 	
@@ -252,6 +286,17 @@ public class GlfwWindow{
 			                       .filter(m->m.bounds.equals(rect))
 			                       .findAny()
 			                       .orElseGet(GlfwMonitor::getPrimaryMonitor));
+			size.set(monitor.get().bounds.width, monitor.get().bounds.height);
+			
+			try{
+				LinkedTreeMap<String, Number> size=(LinkedTreeMap<String, Number>)((LinkedTreeMap)data.get("restore")).get("size");
+				LinkedTreeMap<String, Number> pos =(LinkedTreeMap<String, Number>)((LinkedTreeMap)data.get("restore")).get("location");
+				restoreSize.set(size.getOrDefault("width", this.size.x()).intValue(),
+				                size.getOrDefault("height", this.size.y()).intValue());
+				restorePos.set(pos.getOrDefault("top", this.pos.x()).intValue(),
+				               pos.getOrDefault("left", this.pos.y()).intValue());
+			}catch(Throwable e){}
+			
 			return this;
 		}catch(Throwable e){}
 		
@@ -311,6 +356,19 @@ public class GlfwWindow{
 			bytes.putInt(m.bounds.height);
 			
 			json.addProperty("target", TextUtil.bytesToHex(bytes.array()));
+			JsonObject restore=new JsonObject();
+			
+			JsonObject size=new JsonObject();
+			size.addProperty("width", restoreSize.x());
+			size.addProperty("height", restoreSize.y());
+			JsonObject location=new JsonObject();
+			location.addProperty("top", restorePos.x());
+			location.addProperty("left", restorePos.y());
+			
+			restore.add("size", size);
+			restore.add("location", location);
+			
+			json.add("restore", restore);
 		}else{
 			boolean max=maximized.get();
 			if(max) maximized.set(false);
@@ -331,4 +389,29 @@ public class GlfwWindow{
 		return json;
 	}
 	
+	public void setAutoFullScreen(){
+		
+		pos.set(pos);
+		Rectangle2D windowRect=new Rectangle2D.Float();
+		windowRect.setRect(pos.x(), pos.y(), size.x(), size.y());
+		
+		GlfwMonitor.moveToVisible(windowRect);
+		
+		GlfwMonitor best       =null;
+		double      bestOverlap=0;
+		
+		for(GlfwMonitor monitor : GlfwMonitor.getMonitors()){
+			Rectangle2D overlapRect=windowRect.createIntersection(monitor.bounds);
+			double      overlap    =overlapRect.getWidth()*overlapRect.getHeight();
+			if(bestOverlap<overlap){
+				best=monitor;
+				bestOverlap=overlap;
+			}
+		}
+		monitor.set(best);
+	}
+	
+	public void requestClose(){
+		glfwSetWindowShouldClose(handle, true);
+	}
 }

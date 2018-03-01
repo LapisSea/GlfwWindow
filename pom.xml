@@ -116,7 +116,12 @@
             <artifactId>annotations</artifactId>
             <version>RELEASE</version>
         </dependency>
-    </dependencies>
+		<dependency>
+			<groupId>VulkanNutCracker</groupId>
+			<artifactId>LWJGLUtil</artifactId>
+			<version>0.0.1</version>
+		</dependency>
+	</dependencies>
 
     <repositories>
         <repository>

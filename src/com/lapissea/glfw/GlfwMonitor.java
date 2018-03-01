@@ -1,5 +1,6 @@
 package com.lapissea.glfw;
 
+import com.lapissea.util.LogUtil;
 import com.lapissea.util.PairM;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFWMonitorCallback;
@@ -106,8 +107,7 @@ public class GlfwMonitor{
 		
 		@Override
 		public String toString(){
-			return getClass().getName()
-			       +"[x="+x+
+			return "Rect[x="+x+
 			       ",y="+y+
 			       ",w="+width+
 			       ",h="+height+"]";
@@ -136,7 +136,6 @@ public class GlfwMonitor{
 	}
 	
 	private static void update(){
-		
 		MONITORS.clear();
 		MONITOR_GROUPS.clear();
 		
@@ -212,16 +211,16 @@ public class GlfwMonitor{
 		if(getGroups().stream().noneMatch(group->group.contains(windowRect))){
 			
 			Optional<PairM<Rect, Rectangle2D>> r=
-					getGroups().stream()
-					           .map(group->new PairM<>(group, new Rectangle2D.Double(group.getX(), group.getY(), windowRect.getWidth(), windowRect.getHeight()).createIntersection(group)))
-					           .max(Comparator.comparingDouble(a->a.obj2.getWidth()*a.obj2.getHeight()));
+				getGroups().stream()
+				           .map(group->new PairM<>(group, new Rectangle2D.Double(group.getX(), group.getY(), windowRect.getWidth(), windowRect.getHeight()).createIntersection(group)))
+				           .max(Comparator.comparingDouble(a->a.obj2.getWidth()*a.obj2.getHeight()));
 			if(r.isPresent()){
 				Rectangle2D intersect=r.get().obj2;
 				Rect        group    =r.get().obj1;
 				
 				double x, y,
-						w=Math.min(windowRect.getWidth(), group.getWidth()),
-						h=Math.min(windowRect.getHeight(), group.getHeight());
+					w=Math.min(windowRect.getWidth(), group.getWidth()),
+					h=Math.min(windowRect.getHeight(), group.getHeight());
 				
 				if(windowRect.getMinX()<group.getMinX()) x=group.getMinX();
 				else if(windowRect.getMaxX()>group.getMaxX()) x=group.getMaxX()-w;

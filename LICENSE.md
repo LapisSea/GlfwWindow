@@ -37,7 +37,7 @@ to, the following:
 
   ii. moral rights retained by the original author(s) and/or performer(s);
 
-  iii. publicity and privacy rights pertaining to a person's image or likeness
+  iii. publicity and privacy rights pertaining to a person's frame or likeness
   depicted in a Work;
 
   iv. rights protecting against unfair competition in regards to a Work,
