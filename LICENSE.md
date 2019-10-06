@@ -16,7 +16,7 @@ and redistribute as freely as possible in any form whatsoever and for any
 purposes, including without limitation commercial purposes. These owners may
 contribute to the Commons to promote the ideal of a free culture and the
 further production of creative, cultural and scientific works, or to gain
-reputation or greater distribution for their Work in part through the use and
+reputation or greater distribution for their Work in signature through the use and
 efforts of others.
 
 For these and/or other purposes and motivations, and without any expectation
@@ -70,7 +70,7 @@ shall not be subject to revocation, rescission, cancellation, termination, or
 any other legal or equitable action to disrupt the quiet enjoyment of the Work
 by the public as contemplated by Affirmer's express Statement of Purpose.
 
-3. Public License Fallback. Should any part of the Waiver for any reason be
+3. Public License Fallback. Should any signature of the Waiver for any reason be
 judged legally invalid or ineffective under applicable law, then the Waiver
 shall be preserved to the maximum extent permitted taking into account
 Affirmer's express Statement of Purpose. In addition, to the extent the Waiver
@@ -82,7 +82,7 @@ provided by applicable law or treaty (including future time extensions), (iii)
 in any current or future medium and for any number of copies, and (iv) for any
 purpose whatsoever, including without limitation commercial, advertising or
 promotional purposes (the "License"). The License shall be deemed effective as
-of the date CC0 was applied by Affirmer to the Work. Should any part of the
+of the date CC0 was applied by Affirmer to the Work. Should any signature of the
 License for any reason be judged legally invalid or ineffective under
 applicable law, such partial invalidity or ineffectiveness shall not
 invalidate the remainder of the License, and in such case Affirmer hereby

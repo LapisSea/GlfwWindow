@@ -1,14 +1,27 @@
 package com.lapissea.glfw;
 
-import com.lapissea.glfw.GlfwWindow;
-import com.lapissea.util.event.Event;
 import com.lapissea.vec.interf.IVec2iR;
 
-public class GlfwMouseMoveEvent extends Event<GlfwWindow>{
+import java.util.Stack;
+
+public class GlfwMouseMoveEvent extends GlfwEvent{
 	
-	public final IVec2iR delta;
-	public final IVec2iR position;
-	public final IVec2iR prevPos=new IVec2iR(){
+	private static final Stack<GlfwMouseMoveEvent> STACK=new Stack<>();
+	
+	static synchronized GlfwMouseMoveEvent get(GlfwWindow source, IVec2iR delta, IVec2iR position){
+		GlfwMouseMoveEvent e=STACK.isEmpty()?new GlfwMouseMoveEvent():STACK.pop();
+		e.set(source, delta, position);
+		return e;
+	}
+	
+	static synchronized void give(GlfwMouseMoveEvent e){
+		STACK.push(e);
+	}
+	
+	
+	IVec2iR delta;
+	IVec2iR position;
+	IVec2iR prevPos=new IVec2iR(){
 		@Override
 		public int x(){
 			return position.x()-delta.x();
@@ -20,9 +33,21 @@ public class GlfwMouseMoveEvent extends Event<GlfwWindow>{
 		}
 	};
 	
-	GlfwMouseMoveEvent(GlfwWindow source, IVec2iR delta, IVec2iR position){
-		super(source);
+	void set(GlfwWindow source, IVec2iR delta, IVec2iR position){
+		this.source=source;
 		this.delta=delta;
 		this.position=position;
+	}
+	
+	public IVec2iR getDelta(){
+		return delta;
+	}
+	
+	public IVec2iR getPosition(){
+		return position;
+	}
+	
+	public IVec2iR getPrevPos(){
+		return prevPos;
 	}
 }

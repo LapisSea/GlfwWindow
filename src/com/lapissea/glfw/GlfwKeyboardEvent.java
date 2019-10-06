@@ -1,20 +1,39 @@
 package com.lapissea.glfw;
 
-import com.lapissea.glfw.GlfwWindow;
-import com.lapissea.util.event.Event;
+import java.util.Stack;
 
-public class GlfwKeyboardEvent extends Event<GlfwWindow>{
+public class GlfwKeyboardEvent extends GlfwEvent{
+	
+	private static final Stack<GlfwKeyboardEvent> STACK=new Stack<>();
+	
+	static synchronized GlfwKeyboardEvent get(GlfwWindow source, int key, Type type){
+		GlfwKeyboardEvent e=STACK.isEmpty()?new GlfwKeyboardEvent():STACK.pop();
+		e.set(source, key, type);
+		return e;
+	}
+	
+	static synchronized void give(GlfwKeyboardEvent e){
+		STACK.push(e);
+	}
 	
 	public enum Type{
 		DOWN, HOLD, UP
 	}
 	
-	public final int  key;
-	public final Type type;
+	int  key;
+	Type type;
 	
-	GlfwKeyboardEvent(GlfwWindow source, int key, Type type){
-		super(source);
+	void set(GlfwWindow source, int key, Type type){
+		this.source=source;
 		this.key=key;
 		this.type=type;
+	}
+	
+	public int getKey(){
+		return key;
+	}
+	
+	public Type getType(){
+		return type;
 	}
 }

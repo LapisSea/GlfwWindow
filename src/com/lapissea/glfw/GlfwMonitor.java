@@ -1,6 +1,5 @@
 package com.lapissea.glfw;
 
-import com.lapissea.util.LogUtil;
 import com.lapissea.util.PairM;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFWMonitorCallback;
