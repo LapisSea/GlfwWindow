@@ -1,10 +1,11 @@
 package com.lapissea.glfw;
 
-import java.util.Stack;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 public class GlfwKeyboardEvent extends GlfwEvent{
 	
-	private static final Stack<GlfwKeyboardEvent> STACK=new Stack<>();
+	private static final Deque<GlfwKeyboardEvent> STACK=new ArrayDeque<>();
 	
 	static synchronized GlfwKeyboardEvent get(GlfwWindow source, int key, Type type){
 		GlfwKeyboardEvent e=STACK.isEmpty()?new GlfwKeyboardEvent():STACK.pop();

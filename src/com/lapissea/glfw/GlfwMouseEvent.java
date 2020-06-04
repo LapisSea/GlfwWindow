@@ -1,10 +1,11 @@
 package com.lapissea.glfw;
 
-import java.util.Stack;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 public class GlfwMouseEvent extends GlfwEvent{
 	
-	private static final Stack<GlfwMouseEvent> STACK=new Stack<>();
+	private static final Deque<GlfwMouseEvent> STACK=new ArrayDeque<>();
 	
 	static synchronized GlfwMouseEvent get(GlfwWindow source, int key, Type type){
 		GlfwMouseEvent e=STACK.isEmpty()?new GlfwMouseEvent():STACK.pop();

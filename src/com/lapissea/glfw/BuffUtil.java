@@ -3,6 +3,7 @@ package com.lapissea.glfw;
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
 
+@SuppressWarnings("PointlessBitwiseExpression")
 public class BuffUtil{
 	
 	public static ByteBuffer imageToBuffer(BufferedImage image, ByteBuffer buffer){
