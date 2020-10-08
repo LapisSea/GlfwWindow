@@ -253,6 +253,11 @@
 			<artifactId>jlapisutil</artifactId>
 			<version>LATEST</version>
 		</dependency>
+		<dependency>
+			<groupId>com.github.lapissea</groupId>
+			<artifactId>jlapisvector</artifactId>
+			<version>1.0.7</version>
+		</dependency>
 
 	</dependencies>
 
