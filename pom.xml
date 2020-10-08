@@ -93,18 +93,6 @@
 		</plugins>
 	</build>
 
-	<packaging>jar</packaging>
-	<name>GLFW Window</name>
-	<description>This is a wrapper around LWJGLs GLFW bindings to create a more stable and feature rich window.</description>
-	<url>https://github.com/LapisSea/GlfwWindow</url>
-
-	<licenses>
-		<license>
-			<name>MIT License</name>
-			<url>http://www.opensource.org/licenses/mit-license.php</url>
-		</license>
-	</licenses>
-
 	<profiles>
 		<profile>
 			<id>lwjgl-natives-linux-amd64</id>
@@ -281,4 +269,41 @@
 		</repository>
 	</repositories>
 
+	<packaging>jar</packaging>
+	<name>GLFW Window</name>
+	<description>This is a wrapper around LWJGLs GLFW bindings to create a more stable and feature rich window.</description>
+	<url>https://github.com/LapisSea/GlfwWindow</url>
+
+	<licenses>
+		<license>
+			<name>MIT License</name>
+			<url>http://www.opensource.org/licenses/mit-license.php</url>
+		</license>
+	</licenses>
+
+	<developers>
+		<developer>
+			<name>LapisSea</name>
+			<email>officiallapisseamail@gmail.com</email>
+			<organization>com.github.lapissea</organization>
+			<organizationUrl>https://github.com/LapisSea</organizationUrl>
+		</developer>
+	</developers>
+
+	<distributionManagement>
+		<snapshotRepository>
+			<id>ossrh</id>
+			<url>https://oss.sonatype.org/content/repositories/snapshots</url>
+		</snapshotRepository>
+		<repository>
+			<id>ossrh</id>
+			<url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+		</repository>
+	</distributionManagement>
+
+	<scm>
+		<connection>scm:git:git://github.com/LapisSea/GlfwWindow.git</connection>
+		<developerConnection>scm:git:ssh://github.com:LapisSea/GlfwWindow.git</developerConnection>
+		<url>http://github.com/LapisSea/GlfwWindow/tree/master</url>
+	</scm>
 </project>
