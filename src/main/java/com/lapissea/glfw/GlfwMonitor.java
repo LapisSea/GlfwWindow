@@ -26,22 +26,22 @@ public class GlfwMonitor{
 		
 		@Override
 		public double getX(){
-			return (double)x;
+			return x;
 		}
 		
 		@Override
 		public double getY(){
-			return (double)y;
+			return y;
 		}
 		
 		@Override
 		public double getWidth(){
-			return (double)width;
+			return width;
 		}
 		
 		@Override
 		public double getHeight(){
-			return (double)height;
+			return height;
 		}
 		
 		@Override
@@ -134,11 +134,13 @@ public class GlfwMonitor{
 		if(!INITED) throw new IllegalStateException("\"init\" FUNCTION WAS NOT CALLED");
 	}
 	
-	private static void update(){
+	private static synchronized void update(){
 		MONITORS.clear();
 		MONITOR_GROUPS.clear();
+		PRIMARY_MONITOR=null;
 		
 		PointerBuffer monitors=glfwGetMonitors();
+		if(monitors==null) return;
 		for(int i=0;i<monitors.capacity();i++){
 			MONITORS.add(new GlfwMonitor(monitors.get(i)));
 		}
@@ -187,25 +189,33 @@ public class GlfwMonitor{
 		}
 		groups.stream().map(g->new Rect((int)g.getX(), (int)g.getY(), (int)g.getWidth(), (int)g.getHeight())).forEach(MONITOR_GROUPS::add);
 		long ph=glfwGetPrimaryMonitor();
-		PRIMARY_MONITOR=MONITORS.stream().filter(m->m.handle==ph).findAny().orElseThrow(()->new RuntimeException("No primary monitor in monitor list?? (bug)"));
+		PRIMARY_MONITOR=MONITORS.stream().filter(m->m.handle==ph).findAny().orElse(null);
 	}
 	
-	public static GlfwMonitor getPrimaryMonitor(){
+	public static synchronized GlfwMonitor getPrimaryMonitor(){
 		check();
+		if(PRIMARY_MONITOR==null) throw new IllegalStateException("No monitor");
 		return PRIMARY_MONITOR;
 	}
 	
-	public static List<GlfwMonitor> getMonitors(){
+	public static synchronized List<GlfwMonitor> getMonitors(){
 		check();
 		return MONITORS_F;
 	}
 	
-	public static List<Rect> getGroups(){
+	public static synchronized List<Rect> getGroups(){
 		check();
 		return MONITOR_GROUPS_F;
 	}
 	
-	public static boolean moveToVisible(Rectangle2D windowRect){
+	
+	/**
+	 * @return true if rectangle has been modified
+	 * */
+	public static synchronized boolean moveToVisible(Rectangle2D windowRect){
+		if(getGroups().isEmpty()){
+			return false;
+		}
 		
 		if(getGroups().stream().noneMatch(group->group.contains(windowRect))){
 			
@@ -214,8 +224,7 @@ public class GlfwMonitor{
 				           .map(group->new PairM<>(group, new Rectangle2D.Double(group.getX(), group.getY(), windowRect.getWidth(), windowRect.getHeight()).createIntersection(group)))
 				           .max(Comparator.comparingDouble(a->a.obj2.getWidth()*a.obj2.getHeight()));
 			if(r.isPresent()){
-				Rectangle2D intersect=r.get().obj2;
-				Rect        group    =r.get().obj1;
+				Rect group=r.get().obj1;
 				
 				double x, y,
 					w=Math.min(windowRect.getWidth(), group.getWidth()),

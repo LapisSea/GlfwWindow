@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.internal.LinkedTreeMap;
+import com.lapissea.util.LogUtil;
 import com.lapissea.util.NotNull;
 import com.lapissea.util.TextUtil;
 import com.lapissea.util.UtilL;
@@ -33,13 +34,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
-import static com.lapissea.glfw.GlfwKeyboardEvent.Type.*;
-import static com.lapissea.glfw.GlfwWindow.Cursor.*;
-import static com.lapissea.glfw.GlfwWindow.SurfaceAPI.*;
-import static com.lapissea.util.UtilL.*;
+import static com.lapissea.glfw.GlfwKeyboardEvent.Type.DOWN;
+import static com.lapissea.glfw.GlfwWindow.Cursor.NORMAL;
+import static com.lapissea.glfw.GlfwWindow.SurfaceAPI.OPENGL;
+import static com.lapissea.glfw.GlfwWindow.SurfaceAPI.VULKAN;
+import static com.lapissea.util.UtilL.sleep;
 import static org.lwjgl.glfw.GLFW.*;
-import static org.lwjgl.system.MemoryUtil.*;
+import static org.lwjgl.system.MemoryUtil.NULL;
+import static org.lwjgl.system.MemoryUtil.memAlloc;
 
+@SuppressWarnings("unused")
 public class GlfwWindow{
 	
 	public enum SurfaceAPI{
@@ -47,7 +51,7 @@ public class GlfwWindow{
 		OPENGL_ES(GLFW_OPENGL_ES_API),
 		VULKAN(GLFW_NO_API);
 		
-		protected final int handle;
+		private final int handle;
 		
 		SurfaceAPI(int handle){
 			this.handle=handle;
@@ -59,7 +63,7 @@ public class GlfwWindow{
 		HIDDEN(GLFW_CURSOR_HIDDEN),
 		DISABLED(GLFW_CURSOR_DISABLED);
 		
-		protected final int handle;
+		private final int handle;
 		
 		Cursor(int handle){
 			this.handle=handle;
@@ -148,7 +152,7 @@ public class GlfwWindow{
 	public static class KeyboardEventRegistry extends EventRegistry<GlfwKeyboardEvent>{
 		
 		public boolean register(int key, GlfwKeyboardEvent.Type type, @NotNull Consumer<GlfwKeyboardEvent> listener){
-			return register(e->{ if(e.key==key&&e.type==type) listener.accept(e); });
+			return register(e->{if(e.key==key&&e.type==type) listener.accept(e);});
 		}
 	}
 	
@@ -340,14 +344,14 @@ public class GlfwWindow{
 			images,
 			GLFWImage[]::new,
 			image->GLFWImage.create().set(image.getWidth(), image.getHeight(), BuffUtil.imageToBuffer(image, memAlloc(image.getWidth()*image.getHeight()*4)))
-		                     ));
+		));
 	}
 	
 	public void setIcon(GLFWImage... images){
 		if(images.length==0) return;
 		
 		try(final GLFWImage.Buffer iconSet=GLFWImage.malloc(images.length)){
-			for(int i=images.length-1;i >= 0;i--){
+			for(int i=images.length-1;i>=0;i--){
 				iconSet.put(i, images[i]);
 			}
 			glfwSetWindowIcon(handle, iconSet);
@@ -420,7 +424,7 @@ public class GlfwWindow{
 		return loadState(new Gson().fromJson(data, HashMap.class));
 	}
 	
-	@SuppressWarnings({"unchecked", "CatchMayIgnoreException", "AutoBoxing"})
+	@SuppressWarnings({"unchecked", "AutoBoxing", "rawtypes"})
 	public GlfwWindow loadState(Map<String, LinkedTreeMap> data){
 		
 		try{
@@ -446,22 +450,22 @@ public class GlfwWindow{
 				                sizeD.getOrDefault("height", size.y()).intValue());
 				restorePos.set(posD.getOrDefault("top", pos.x()).intValue(),
 				               posD.getOrDefault("left", pos.y()).intValue());
-			}catch(Throwable e){}
+			}catch(Throwable ignored){}
 			
 			return this;
-		}catch(Throwable e){}
+		}catch(Throwable ignored){}
 		
 		try{
 			LinkedTreeMap<String, Number> size=data.get("size");
 			this.size.set(size.getOrDefault("width", this.size.x()).intValue(),
 			              size.getOrDefault("height", this.size.y()).intValue());
-		}catch(Throwable e){}
+		}catch(Throwable ignored){}
 		
 		try{
 			LinkedTreeMap<String, Number> pos=data.get("location");
 			this.pos.set(pos.getOrDefault("top", this.pos.x()).intValue(),
 			             pos.getOrDefault("left", this.pos.y()).intValue());
-		}catch(Throwable e){}
+		}catch(Throwable ignored){}
 		try{
 			maximized.set(Boolean.parseBoolean(data.get("max")+""));
 		}catch(Throwable e){
@@ -479,7 +483,7 @@ public class GlfwWindow{
 		                        .create();
 	}
 	
-	public GlfwWindow saveState(File file){
+	public synchronized GlfwWindow saveState(File file){
 		File tmp=new File(file.getPath()+"@");
 		try(Writer data=new BufferedWriter(new FileWriter(tmp))){
 			saveState(data);
@@ -679,30 +683,41 @@ public class GlfwWindow{
 	public void autoHandleStateSaving(File saveFile, int timeoutInterval){
 		loadState(saveFile);
 		
-		long[]   lastChangePtr  ={System.currentTimeMillis()};
-		long[]   lastSavePtr    ={lastChangePtr[0]};
-		Thread[] targetThreadPtr={null};
-		
-		whileOpen(()->{
-			targetThreadPtr[0]=Thread.currentThread();
+		class Runner extends Thread{
+			private       long lastChange=System.nanoTime();
+			private       long lastSave  =lastChange;
+			private final long timeoutIntervalNs;
 			
-			long lastChange=lastChangePtr[0];
-			if(iconified.get()||lastChange==lastSavePtr[0]||System.currentTimeMillis()<lastChange+timeoutInterval){
-				sleep(timeoutInterval);
-				return;
+			private Runner(long timeoutIntervalNs){
+				super("GlfwStateMonitor");
+				this.timeoutIntervalNs=timeoutIntervalNs;
 			}
 			
-			lastSavePtr[0]=lastChange;
-			
-			saveState(saveFile);
-			sleep(timeoutInterval);
-		}, "GlfwStateMonitor");
+			@Override
+			public void run(){
+				UtilL.sleepWhile(()->!isCreated());
+				whileOpen(()->{
+					long lastChange=this.lastChange;
+					if(iconified.get()||lastChange==lastSave||System.nanoTime()<lastChange+timeoutIntervalNs){
+						UtilL.sleep(timeoutInterval);
+						return;
+					}
+					
+					this.lastSave=lastChange;
+					
+					saveState(saveFile);
+					UtilL.sleep(timeoutInterval);
+				});
+			}
+		}
 		
-		sleepWhile(()->targetThreadPtr[0]==null);
+		Runner runner=new Runner(timeoutInterval*1000_000L);
+		runner.setDaemon(true);
+		runner.start();
 		
 		Runnable changeEvent=()->{
-			lastChangePtr[0]=System.currentTimeMillis();
-			targetThreadPtr[0].interrupt();
+			runner.lastChange=System.nanoTime();
+			runner.interrupt();
 		};
 		
 		size.register(changeEvent);

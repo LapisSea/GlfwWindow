@@ -5,24 +5,23 @@
 	<groupId>com.github.lapissea</groupId>
 	<artifactId>glfw-window</artifactId>
 
-	<version>1.0.0</version>
+	<version>1.0.1</version>
 
 	<properties>
-		<lwjgl.version>3.2.3</lwjgl.version>
-		<maven.compiler.release>8</maven.compiler.release>
+		<lwjgl.version>3.3.1</lwjgl.version>
+		<jversion>8</jversion>
 	</properties>
 
 	<build>
 		<defaultGoal>install</defaultGoal>
-		<sourceDirectory>src\</sourceDirectory>
 		<plugins>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
 				<version>3.7.0</version>
 				<configuration>
-					<source>${maven.compiler.release}</source>
-					<target>${maven.compiler.release}</target>
+					<source>${jversion}</source>
+					<target>${jversion}</target>
 				</configuration>
 			</plugin>
 
