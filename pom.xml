@@ -5,7 +5,7 @@
 	<groupId>com.github.lapissea</groupId>
 	<artifactId>glfw-window</artifactId>
 
-	<version>1.0.2</version>
+	<version>1.0.3</version>
 
 	<properties>
 		<lwjgl.version>3.3.1</lwjgl.version>
@@ -250,7 +250,7 @@
 		<dependency>
 			<groupId>com.github.lapissea</groupId>
 			<artifactId>jlapisutil</artifactId>
-			<version>1.0.11</version>
+			<version>1.1.0</version>
 		</dependency>
 		<dependency>
 			<groupId>com.github.lapissea</groupId>

@@ -9,9 +9,9 @@ public class Test{
 		GlfwMonitor.init();
 		GlfwWindow win=new GlfwWindow();
 		win.autoHandleStateSaving(new File("ay.json"), 100);
-		win.visible.set(true);
 		win.autoF11Toggle();
 		win.init();
+		win.visible.set(true);
 		win.pollEventsWhileOpen();
 	}
 	

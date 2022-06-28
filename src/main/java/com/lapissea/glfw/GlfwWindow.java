@@ -425,7 +425,9 @@ public class GlfwWindow{
 	}
 	
 	@SuppressWarnings({"unchecked", "AutoBoxing", "rawtypes"})
-	public GlfwWindow loadState(Map<String, LinkedTreeMap> data){
+	public GlfwWindow loadState(Map<String, Map> data){
+		
+		boolean logProblems=UtilL.sysPropertyByClass(GlfwWindow.class, "logProblems", Boolean.FALSE, Boolean::valueOf);
 		
 		try{
 			IntBuffer target=ByteBuffer.wrap(TextUtil.hexStringToByteArray(((Map<String, ?>)data).get("target").toString()))
@@ -442,30 +444,38 @@ public class GlfwWindow{
 			size.set(monitor.get().bounds.width, monitor.get().bounds.height);
 			
 			try{
-				LinkedTreeMap<String, LinkedTreeMap<String, Number>> restore=data.get("restore");
+				Map<String, Map<String, Number>> restore=data.get("restore");
 				
-				LinkedTreeMap<String, Number> sizeD=restore.get("size"), posD=restore.get("location");
+				Map<String, Number> sizeD=restore.get("size"), posD=restore.get("location");
 				
 				restoreSize.set(sizeD.getOrDefault("width", size.x()).intValue(),
 				                sizeD.getOrDefault("height", size.y()).intValue());
 				restorePos.set(posD.getOrDefault("top", pos.x()).intValue(),
 				               posD.getOrDefault("left", pos.y()).intValue());
-			}catch(Throwable ignored){}
+			}catch(Throwable e){
+				if(logProblems) LogUtil.println(e);
+			}
 			
 			return this;
-		}catch(Throwable ignored){}
+		}catch(Throwable e){
+			if(logProblems) LogUtil.println(e);
+		}
 		
 		try{
-			LinkedTreeMap<String, Number> size=data.get("size");
+			Map<String, Number> size=data.get("size");
 			this.size.set(size.getOrDefault("width", this.size.x()).intValue(),
 			              size.getOrDefault("height", this.size.y()).intValue());
-		}catch(Throwable ignored){}
+		}catch(Throwable e){
+			if(logProblems) LogUtil.println(e);
+		}
 		
 		try{
-			LinkedTreeMap<String, Number> pos=data.get("location");
+			Map<String, Number> pos=data.get("location");
 			this.pos.set(pos.getOrDefault("top", this.pos.x()).intValue(),
 			             pos.getOrDefault("left", this.pos.y()).intValue());
-		}catch(Throwable ignored){}
+		}catch(Throwable e){
+			if(logProblems) LogUtil.println(e);
+		}
 		try{
 			maximized.set(Boolean.parseBoolean(data.get("max")+""));
 		}catch(Throwable e){
@@ -556,8 +566,13 @@ public class GlfwWindow{
 				if(restorePos.equals(0, 0)) restorePos.set(pos);
 				if(restoreSize.equals(0, 0)) restoreSize.set(size);
 				
-				resSiz=restoreSize;
-				resPos=restorePos;
+				if(maximized.get()||iconified.get()){
+					resSiz=restoreSize;
+					resPos=restorePos;
+				}else{
+					resSiz=this.size;
+					resPos=pos;
+				}
 			}
 			
 			JsonObject size=new JsonObject();
