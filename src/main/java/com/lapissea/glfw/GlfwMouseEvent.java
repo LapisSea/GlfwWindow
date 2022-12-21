@@ -1,30 +1,15 @@
 package com.lapissea.glfw;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-
 public class GlfwMouseEvent extends GlfwEvent{
-	
-	private static final Deque<GlfwMouseEvent> STACK = new ArrayDeque<>();
-	
-	static synchronized GlfwMouseEvent get(GlfwWindow source, int key, Type type){
-		GlfwMouseEvent e = STACK.isEmpty()? new GlfwMouseEvent() : STACK.pop();
-		e.set(source, key, type);
-		return e;
-	}
-	
-	static synchronized void give(GlfwMouseEvent e){
-		STACK.push(e);
-	}
 	
 	public enum Type{
 		DOWN, UP, HOLD
 	}
 	
-	int  key;
-	Type type;
+	private int  key;
+	private Type type;
 	
-	void set(GlfwWindow source, int key, Type type){
+	GlfwMouseEvent(GlfwWindow source, int key, Type type){
 		this.source = source;
 		this.key = key;
 		this.type = type;

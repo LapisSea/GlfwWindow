@@ -141,7 +141,7 @@ public class GlfwWindow{
 	public static class KeyboardEventRegistry extends EventRegistry<GlfwKeyboardEvent>{
 		
 		public boolean register(int key, GlfwKeyboardEvent.Type type, @NotNull Consumer<GlfwKeyboardEvent> listener){
-			return register(e -> { if(e.key == key && e.type == type) listener.accept(e); });
+			return register(e -> { if(e.getKey() == key && e.getType() == type) listener.accept(e); });
 		}
 	}
 	
@@ -384,12 +384,7 @@ public class GlfwWindow{
 			else if(action == GLFW_REPEAT) type = GlfwKeyboardEvent.Type.HOLD;
 			else type = GlfwKeyboardEvent.Type.UP;
 			
-			GlfwKeyboardEvent e = GlfwKeyboardEvent.get(this, key, type);
-			try{
-				registryKeyboardKey.dispatch(e);
-			}finally{
-				GlfwKeyboardEvent.give(e);
-			}
+			registryKeyboardKey.dispatch(new GlfwKeyboardEvent(this, key, type));
 		}));
 		glfwSetMouseButtonCallback(handle, GLFWMouseButtonCallback.create((window, button, action, mods) -> {
 			if(window != handle) return;
@@ -399,12 +394,7 @@ public class GlfwWindow{
 			else if(action == GLFW_REPEAT) type = GlfwMouseEvent.Type.HOLD;
 			else type = GlfwMouseEvent.Type.UP;
 			
-			GlfwMouseEvent e = GlfwMouseEvent.get(this, button, type);
-			try{
-				registryMouseButton.dispatch(e);
-			}finally{
-				GlfwMouseEvent.give(e);
-			}
+			registryMouseButton.dispatch(new GlfwMouseEvent(this, button, type));
 		}));
 		glfwSetCursorPosCallback(handle, GLFWCursorPosCallback.create((window, xpos, ypos) -> {
 			if(window != handle) return;
@@ -412,12 +402,7 @@ public class GlfwWindow{
 			Vec2i delta = mousePosControl.clone().sub(mousePos);
 			mousePos.set(mousePosControl);
 			
-			GlfwMouseMoveEvent e = GlfwMouseMoveEvent.get(this, delta, mousePos);
-			try{
-				registryMouseMove.dispatch(e);
-			}finally{
-				GlfwMouseMoveEvent.give(e);
-			}
+			registryMouseMove.dispatch(new GlfwMouseMoveEvent(this, delta, mousePos));
 		}));
 		glfwSetScrollCallback(handle, (window, xoffset, yoffset) -> {
 			if(window != handle) return;

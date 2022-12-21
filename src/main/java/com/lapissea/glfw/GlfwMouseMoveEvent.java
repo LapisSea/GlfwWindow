@@ -2,27 +2,11 @@ package com.lapissea.glfw;
 
 import com.lapissea.vec.interf.IVec2iR;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-
 public class GlfwMouseMoveEvent extends GlfwEvent{
 	
-	private static final Deque<GlfwMouseMoveEvent> STACK = new ArrayDeque<>();
-	
-	static synchronized GlfwMouseMoveEvent get(GlfwWindow source, IVec2iR delta, IVec2iR position){
-		GlfwMouseMoveEvent e = STACK.isEmpty()? new GlfwMouseMoveEvent() : STACK.pop();
-		e.set(source, delta, position);
-		return e;
-	}
-	
-	static synchronized void give(GlfwMouseMoveEvent e){
-		STACK.push(e);
-	}
-	
-	
-	IVec2iR delta;
-	IVec2iR position;
-	IVec2iR prevPos = new IVec2iR(){
+	private       IVec2iR delta;
+	private       IVec2iR position;
+	private final IVec2iR prevPos = new IVec2iR(){
 		@Override
 		public int x(){
 			return position.x() - delta.x();
@@ -34,7 +18,7 @@ public class GlfwMouseMoveEvent extends GlfwEvent{
 		}
 	};
 	
-	void set(GlfwWindow source, IVec2iR delta, IVec2iR position){
+	GlfwMouseMoveEvent(GlfwWindow source, IVec2iR delta, IVec2iR position){
 		this.source = source;
 		this.delta = delta;
 		this.position = position;
