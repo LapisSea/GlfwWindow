@@ -113,7 +113,6 @@ public class GlfwMonitor{
 		}
 	}
 	
-	private static boolean INITED;
 	
 	private static       GlfwMonitor       PRIMARY_MONITOR  = null;
 	private static final List<GlfwMonitor> MONITORS         = new ArrayList<>(1);
@@ -121,17 +120,10 @@ public class GlfwMonitor{
 	private static final List<Rect>        MONITOR_GROUPS   = new ArrayList<>(1);
 	private static final List<Rect>        MONITOR_GROUPS_F = Collections.unmodifiableList(MONITOR_GROUPS);
 	
-	public static void init(){
-		if(INITED) return;
-		INITED = true;
-		
+	static void init(){
 		glfwInit();
 		update();
 		glfwSetMonitorCallback(GLFWMonitorCallback.create((monitor, event) -> update()));
-	}
-	
-	private static void check(){
-		if(!INITED) throw new IllegalStateException("\"init\" FUNCTION WAS NOT CALLED");
 	}
 	
 	private static synchronized void update(){
@@ -193,18 +185,15 @@ public class GlfwMonitor{
 	}
 	
 	public static synchronized GlfwMonitor getPrimaryMonitor(){
-		check();
 		if(PRIMARY_MONITOR == null) throw new IllegalStateException("No monitor");
 		return PRIMARY_MONITOR;
 	}
 	
 	public static synchronized List<GlfwMonitor> getMonitors(){
-		check();
 		return MONITORS_F;
 	}
 	
 	public static synchronized List<Rect> getGroups(){
-		check();
 		return MONITOR_GROUPS_F;
 	}
 	

@@ -3,10 +3,7 @@ package com.lapissea.glfw;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
-import com.lapissea.util.LogUtil;
-import com.lapissea.util.NotNull;
-import com.lapissea.util.TextUtil;
-import com.lapissea.util.UtilL;
+import com.lapissea.util.*;
 import com.lapissea.util.event.EventRegistry;
 import com.lapissea.util.event.change.ChangeRegistry;
 import com.lapissea.util.event.change.ChangeRegistryBool;
@@ -26,17 +23,14 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import static com.lapissea.glfw.GlfwKeyboardEvent.Type.DOWN;
 import static com.lapissea.glfw.GlfwWindow.Cursor.NORMAL;
-import static com.lapissea.glfw.GlfwWindow.SurfaceAPI.OPENGL;
-import static com.lapissea.glfw.GlfwWindow.SurfaceAPI.VULKAN;
 import static com.lapissea.util.UtilL.sleep;
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.system.MemoryUtil.NULL;
@@ -45,16 +39,13 @@ import static org.lwjgl.system.MemoryUtil.memAlloc;
 @SuppressWarnings("unused")
 public class GlfwWindow{
 	
-	public enum SurfaceAPI{
-		OPENGL(GLFW_OPENGL_API),
-		OPENGL_ES(GLFW_OPENGL_ES_API),
-		VULKAN(GLFW_NO_API);
-		
-		private final int handle;
-		
-		SurfaceAPI(int handle){
-			this.handle = handle;
-		}
+	static{ initGLFW(); }
+	
+	private static boolean INITED;
+	public static synchronized void initGLFW(){
+		if(INITED) return;
+		INITED = true;
+		GlfwMonitor.init();
 	}
 	
 	public enum Cursor{
@@ -90,7 +81,6 @@ public class GlfwWindow{
 		}else glfwHideWindow(handle);
 		if(maximized.get()) glfwMaximizeWindow(handle);
 	});
-	
 	
 	public final ChangeRegistryVec2i size = new ChangeRegistryVec2i(600, 400, siz -> {
 		if(isCreated() && !isFullScreen()) glfwSetWindowSize(handle, siz.x(), siz.y());
@@ -167,37 +157,159 @@ public class GlfwWindow{
 	
 	private final ArrayList<Runnable> onDestroy = new ArrayList<>(1);
 	
-	public GlfwWindow init(){
-		return init(OPENGL);
+	
+	public static class Initializer{
+		
+		private interface SurfaceAPI<SELF extends SurfaceAPI<SELF>>{
+			void apply();
+			
+			default SELF withVersion(float version){
+				return withVersion((int)version, (int)((version%1)*10));
+			}
+			SELF withVersion(int major, int minor);
+		}
+		
+		public interface OpenGLSurfaceAPI extends SurfaceAPI<OpenGLSurfaceAPI>{
+			
+			enum Profile{
+				ANY(GLFW_OPENGL_ANY_PROFILE),
+				CORE(GLFW_OPENGL_CORE_PROFILE),
+				COMPATIBILITY(GLFW_OPENGL_COMPAT_PROFILE),
+				;
+				private final int handle;
+				
+				Profile(int handle){
+					this.handle = handle;
+				}
+			}
+			
+			OpenGLSurfaceAPI withSamples(int samples);
+			OpenGLSurfaceAPI forwardCompatible();
+			OpenGLSurfaceAPI withProfile(Profile profile);
+		}
+		
+		public interface VulkanSurfaceAPI extends SurfaceAPI<VulkanSurfaceAPI>{
+		}
+		
+		private static final class OpenGLImpl implements OpenGLSurfaceAPI{
+			
+			private int     versionMajor      = 3;
+			private int     versionMinor      = 3;
+			private int     samples           = 1;
+			private boolean forwardCompatible = false;
+			private Profile profile           = Profile.CORE;
+			
+			@Override
+			public void apply(){
+				glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+				glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, versionMajor);
+				glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, versionMinor);
+				if(samples>1) glfwWindowHint(GLFW_SAMPLES, samples);
+				glfwWindowHintBool(GLFW_OPENGL_FORWARD_COMPAT, forwardCompatible);
+				glfwWindowHint(GLFW_OPENGL_PROFILE, profile.handle);
+			}
+			
+			@Override
+			public OpenGLSurfaceAPI withVersion(int major, int minor){
+				versionMajor = major;
+				versionMinor = minor;
+				return this;
+			}
+			@Override
+			public OpenGLSurfaceAPI withSamples(int samples){
+				if(samples<=0) throw new IllegalArgumentException("Samples must be 1 or greater");
+				this.samples = samples;
+				return this;
+			}
+			@Override
+			public OpenGLSurfaceAPI forwardCompatible(){
+				forwardCompatible = true;
+				return this;
+			}
+			@Override
+			public OpenGLSurfaceAPI withProfile(Profile profile){
+				this.profile = Objects.requireNonNull(profile);
+				return this;
+			}
+		}
+		
+		private static final class VulkanImpl implements VulkanSurfaceAPI{
+			
+			private int versionMajor = 1;
+			private int versionMinor = 1;
+			
+			@Override
+			public void apply(){
+				glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+				glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, versionMajor);
+				glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, versionMinor);
+			}
+			@Override
+			public VulkanSurfaceAPI withVersion(int major, int minor){
+				versionMajor = major;
+				versionMinor = minor;
+				return this;
+			}
+		}
+		
+		private SurfaceAPI<?> api              = new OpenGLImpl();
+		private boolean       resizeable       = true;
+		private boolean       decorated        = true;
+		private boolean       transparent      = false;
+		private boolean       alwaysOnTop      = false;
+		private boolean       mousePassthrough = false;
+		
+		private Initializer(){
+		}
+		
+		
+		public Initializer withVulkan(){ return withVulkan(Function.identity()); }
+		public Initializer withVulkan(Function<VulkanSurfaceAPI, VulkanSurfaceAPI> settings){
+			api = Objects.requireNonNull(settings.apply(new VulkanImpl()));
+			return this;
+		}
+		public Initializer withOpenGL(){ return withOpenGL(Function.identity()); }
+		public Initializer withOpenGL(Function<OpenGLSurfaceAPI, OpenGLSurfaceAPI> settings){
+			api = Objects.requireNonNull(settings.apply(new OpenGLImpl()));
+			return this;
+		}
+		
+		public Initializer resizeable(boolean resizeable){
+			this.resizeable = resizeable;
+			return this;
+		}
+		public Initializer decorated(boolean decorated){
+			this.decorated = decorated;
+			return this;
+		}
+		public Initializer transparent(boolean transparent){
+			this.transparent = transparent;
+			return this;
+		}
+		public Initializer alwaysOnTop(boolean alwaysOnTop){
+			this.alwaysOnTop = alwaysOnTop;
+			return this;
+		}
+		public Initializer mousePassthrough(boolean mousePassthrough){
+			this.mousePassthrough = mousePassthrough;
+			return this;
+		}
+		
 	}
 	
-	public GlfwWindow init(boolean resizeable, boolean decorated){
-		return init(OPENGL, resizeable, decorated, false);
-	}
+	public GlfwWindow init()                                        { return init(new Initializer()); }
+	public GlfwWindow init(Function<Initializer, Initializer> setup){ return init(setup.apply(new Initializer())); }
 	
-	public GlfwWindow init(boolean resizeable){
-		return init(OPENGL, resizeable);
-	}
-	
-	public GlfwWindow init(@NotNull SurfaceAPI api){
-		return init(api, true);
-	}
-	
-	public GlfwWindow init(@NotNull SurfaceAPI api, boolean resizeable){
-		return init(api, resizeable, true, false);
-	}
-	
-	public GlfwWindow init(@NotNull SurfaceAPI api, boolean resizeable, boolean decorated, boolean transparent){
+	private GlfwWindow init(Initializer args){
 		pos.set(pos);
 		moveToVisible();
-		preInit(api, resizeable, decorated, transparent);
-		
+		preInit(args);
 		
 		if(isFullScreen()){
 			GlfwMonitor monitor = this.monitor.get();
 			handle = glfwCreateWindow(monitor.bounds.width, monitor.bounds.height, "", monitor.handle, handle);
 		}else handle = glfwCreateWindow(100, 100, "", NULL, handle);
-		if(api == VULKAN){
+		if(args.api instanceof Initializer.VulkanSurfaceAPI){
 			glfwSetWindowSizeLimits(handle, 1, 1, GLFW_DONT_CARE, GLFW_DONT_CARE);
 		}
 		initProps();
@@ -220,15 +332,26 @@ public class GlfwWindow{
 		return monitor.get() != null;
 	}
 	
-	private void preInit(SurfaceAPI api, boolean resizeable, boolean decorated, boolean transparent){
-		glfwWindowHint(GLFW_CLIENT_API, api.handle);
-		glfwWindowHint(GLFW_RESIZABLE, resizeable? GLFW_TRUE : GLFW_FALSE);
-		glfwWindowHint(GLFW_DECORATED, decorated? GLFW_TRUE : GLFW_FALSE);
-		if(isFullScreen()) glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
-		glfwWindowHint(GLFW_VISIBLE, visible.get()? GLFW_TRUE : GLFW_FALSE);
-		glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, transparent? GLFW_TRUE : GLFW_FALSE);
+	private void preInit(Initializer args){
+		glfwWindowHintBool(GLFW_RESIZABLE, args.resizeable);
+		glfwWindowHintBool(GLFW_DECORATED, args.decorated);
+		if(isFullScreen()) glfwWindowHintBool(GLFW_VISIBLE, true);
+		glfwWindowHintBool(GLFW_VISIBLE, visible.get());
+		glfwWindowHintBool(GLFW_TRANSPARENT_FRAMEBUFFER, args.transparent);
+		glfwWindowHintBool(GLFW_FLOATING, args.alwaysOnTop);
+		glfwWindowHintBool(GLFW_MOUSE_PASSTHROUGH, args.mousePassthrough);
+		
+		args.api.apply();
 	}
 	
+	private static void glfwWindowHintBool(int prop, boolean val){
+		glfwWindowHint(prop, glBool(val));
+	}
+	private static int glBool(boolean val){
+		return val? GLFW_TRUE : GLFW_FALSE;
+	}
+	
+	@SuppressWarnings("resource")
 	protected void initProps(){
 		
 		glfwSetWindowMaximizeCallback(handle, (window, maximized) -> {
@@ -339,11 +462,12 @@ public class GlfwWindow{
 	
 	public void setIcon(BufferedImage... images){
 		if(images.length == 0) return;
-		setIcon(UtilL.convert(
-			images,
-			GLFWImage[]::new,
-			image -> GLFWImage.create().set(image.getWidth(), image.getHeight(), BuffUtil.imageToBuffer(image, memAlloc(image.getWidth()*image.getHeight()*4)))
-		));
+		setIcon(Arrays.stream(images)
+		              .map(image -> {
+			              int w = image.getWidth(), h = image.getHeight();
+			              return GLFWImage.create().set(w, h, BuffUtil.imageToBuffer(image, memAlloc(w*h*4)));
+		              })
+		              .toArray(GLFWImage[]::new));
 	}
 	
 	public void setIcon(GLFWImage... images){
