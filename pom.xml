@@ -5,7 +5,7 @@
 	<groupId>com.github.lapissea</groupId>
 	<artifactId>glfw-window</artifactId>
 
-	<version>1.1</version>
+	<version>1.1.1</version>
 
 	<properties>
 		<lwjgl.version>3.3.1</lwjgl.version>

@@ -3,7 +3,10 @@ package com.lapissea.glfw;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
-import com.lapissea.util.*;
+import com.lapissea.util.LogUtil;
+import com.lapissea.util.NotNull;
+import com.lapissea.util.TextUtil;
+import com.lapissea.util.UtilL;
 import com.lapissea.util.event.EventRegistry;
 import com.lapissea.util.event.change.ChangeRegistry;
 import com.lapissea.util.event.change.ChangeRegistryBool;
@@ -16,6 +19,7 @@ import org.lwjgl.glfw.GLFWCursorPosCallback;
 import org.lwjgl.glfw.GLFWImage;
 import org.lwjgl.glfw.GLFWKeyCallback;
 import org.lwjgl.glfw.GLFWMouseButtonCallback;
+import org.lwjgl.opengl.GL;
 
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
@@ -161,9 +165,10 @@ public class GlfwWindow{
 	public static class Initializer{
 		
 		private interface SurfaceAPI<SELF extends SurfaceAPI<SELF>>{
-			void apply();
+			void preInit();
+			void postInit(GlfwWindow window);
 			
-			default SELF withVersion(float version){
+			default SELF withVersion(double version){
 				return withVersion((int)version, (int)((version%1)*10));
 			}
 			SELF withVersion(int major, int minor);
@@ -186,6 +191,7 @@ public class GlfwWindow{
 			OpenGLSurfaceAPI withSamples(int samples);
 			OpenGLSurfaceAPI forwardCompatible();
 			OpenGLSurfaceAPI withProfile(Profile profile);
+			OpenGLSurfaceAPI withDebugContext();
 		}
 		
 		public interface VulkanSurfaceAPI extends SurfaceAPI<VulkanSurfaceAPI>{
@@ -197,16 +203,23 @@ public class GlfwWindow{
 			private int     versionMinor      = 3;
 			private int     samples           = 1;
 			private boolean forwardCompatible = false;
+			private boolean debugContext      = false;
 			private Profile profile           = Profile.CORE;
 			
 			@Override
-			public void apply(){
+			public void preInit(){
 				glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+				if(samples>1) glfwWindowHint(GLFW_SAMPLES, samples);
+			}
+			@Override
+			public void postInit(GlfwWindow window){
+				window.grabContext();
 				glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, versionMajor);
 				glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, versionMinor);
-				if(samples>1) glfwWindowHint(GLFW_SAMPLES, samples);
 				glfwWindowHintBool(GLFW_OPENGL_FORWARD_COMPAT, forwardCompatible);
 				glfwWindowHint(GLFW_OPENGL_PROFILE, profile.handle);
+				glfwWindowHintBool(GLFW_OPENGL_DEBUG_CONTEXT, debugContext);
+				GL.createCapabilities();
 			}
 			
 			@Override
@@ -231,6 +244,11 @@ public class GlfwWindow{
 				this.profile = Objects.requireNonNull(profile);
 				return this;
 			}
+			@Override
+			public OpenGLSurfaceAPI withDebugContext(){
+				this.debugContext = true;
+				return this;
+			}
 		}
 		
 		private static final class VulkanImpl implements VulkanSurfaceAPI{
@@ -239,11 +257,15 @@ public class GlfwWindow{
 			private int versionMinor = 1;
 			
 			@Override
-			public void apply(){
+			public void preInit(){
 				glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+			}
+			@Override
+			public void postInit(GlfwWindow window){
 				glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, versionMajor);
 				glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, versionMinor);
 			}
+			
 			@Override
 			public VulkanSurfaceAPI withVersion(int major, int minor){
 				versionMajor = major;
@@ -258,6 +280,7 @@ public class GlfwWindow{
 		private boolean       transparent      = false;
 		private boolean       alwaysOnTop      = false;
 		private boolean       mousePassthrough = false;
+		private boolean       doubleBuffer     = false;
 		
 		private Initializer(){
 		}
@@ -294,6 +317,10 @@ public class GlfwWindow{
 			this.mousePassthrough = mousePassthrough;
 			return this;
 		}
+		public Initializer doubleBuffer(boolean doubleBuffer){
+			this.doubleBuffer = doubleBuffer;
+			return this;
+		}
 		
 	}
 	
@@ -313,6 +340,8 @@ public class GlfwWindow{
 			glfwSetWindowSizeLimits(handle, 1, 1, GLFW_DONT_CARE, GLFW_DONT_CARE);
 		}
 		initProps();
+		
+		args.api.postInit(this);
 		
 		return this;
 	}
@@ -340,8 +369,9 @@ public class GlfwWindow{
 		glfwWindowHintBool(GLFW_TRANSPARENT_FRAMEBUFFER, args.transparent);
 		glfwWindowHintBool(GLFW_FLOATING, args.alwaysOnTop);
 		glfwWindowHintBool(GLFW_MOUSE_PASSTHROUGH, args.mousePassthrough);
+		glfwWindowHintBool(GLFW_DOUBLEBUFFER, args.doubleBuffer);
 		
-		args.api.apply();
+		args.api.preInit();
 	}
 	
 	private static void glfwWindowHintBool(int prop, boolean val){
