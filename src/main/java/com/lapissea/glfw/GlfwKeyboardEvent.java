@@ -5,10 +5,10 @@ import java.util.Deque;
 
 public class GlfwKeyboardEvent extends GlfwEvent{
 	
-	private static final Deque<GlfwKeyboardEvent> STACK=new ArrayDeque<>();
+	private static final Deque<GlfwKeyboardEvent> STACK = new ArrayDeque<>();
 	
 	static synchronized GlfwKeyboardEvent get(GlfwWindow source, int key, Type type){
-		GlfwKeyboardEvent e=STACK.isEmpty()?new GlfwKeyboardEvent():STACK.pop();
+		GlfwKeyboardEvent e = STACK.isEmpty()? new GlfwKeyboardEvent() : STACK.pop();
 		e.set(source, key, type);
 		return e;
 	}
@@ -25,9 +25,9 @@ public class GlfwKeyboardEvent extends GlfwEvent{
 	Type type;
 	
 	void set(GlfwWindow source, int key, Type type){
-		this.source=source;
-		this.key=key;
-		this.type=type;
+		this.source = source;
+		this.key = key;
+		this.type = type;
 	}
 	
 	public int getKey(){

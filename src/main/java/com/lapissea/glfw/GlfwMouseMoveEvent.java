@@ -7,10 +7,10 @@ import java.util.Deque;
 
 public class GlfwMouseMoveEvent extends GlfwEvent{
 	
-	private static final Deque<GlfwMouseMoveEvent> STACK=new ArrayDeque<>();
+	private static final Deque<GlfwMouseMoveEvent> STACK = new ArrayDeque<>();
 	
 	static synchronized GlfwMouseMoveEvent get(GlfwWindow source, IVec2iR delta, IVec2iR position){
-		GlfwMouseMoveEvent e=STACK.isEmpty()?new GlfwMouseMoveEvent():STACK.pop();
+		GlfwMouseMoveEvent e = STACK.isEmpty()? new GlfwMouseMoveEvent() : STACK.pop();
 		e.set(source, delta, position);
 		return e;
 	}
@@ -22,22 +22,22 @@ public class GlfwMouseMoveEvent extends GlfwEvent{
 	
 	IVec2iR delta;
 	IVec2iR position;
-	IVec2iR prevPos=new IVec2iR(){
+	IVec2iR prevPos = new IVec2iR(){
 		@Override
 		public int x(){
-			return position.x()-delta.x();
+			return position.x() - delta.x();
 		}
 		
 		@Override
 		public int y(){
-			return position.y()-delta.y();
+			return position.y() - delta.y();
 		}
 	};
 	
 	void set(GlfwWindow source, IVec2iR delta, IVec2iR position){
-		this.source=source;
-		this.delta=delta;
-		this.position=position;
+		this.source = source;
+		this.delta = delta;
+		this.position = position;
 	}
 	
 	public IVec2iR getDelta(){

@@ -5,10 +5,10 @@ import java.util.Deque;
 
 public class GlfwMouseEvent extends GlfwEvent{
 	
-	private static final Deque<GlfwMouseEvent> STACK=new ArrayDeque<>();
+	private static final Deque<GlfwMouseEvent> STACK = new ArrayDeque<>();
 	
 	static synchronized GlfwMouseEvent get(GlfwWindow source, int key, Type type){
-		GlfwMouseEvent e=STACK.isEmpty()?new GlfwMouseEvent():STACK.pop();
+		GlfwMouseEvent e = STACK.isEmpty()? new GlfwMouseEvent() : STACK.pop();
 		e.set(source, key, type);
 		return e;
 	}
@@ -25,9 +25,9 @@ public class GlfwMouseEvent extends GlfwEvent{
 	Type type;
 	
 	void set(GlfwWindow source, int key, Type type){
-		this.source=source;
-		this.key=key;
-		this.type=type;
+		this.source = source;
+		this.key = key;
+		this.type = type;
 	}
 	
 	public int getKey(){
@@ -40,10 +40,10 @@ public class GlfwMouseEvent extends GlfwEvent{
 	
 	@Override
 	public String toString(){
-		return "GlfwMouseEvent{"+
-		       "key="+key+
-		       ", type="+type+
-		       ", source="+source+
+		return "GlfwMouseEvent{" +
+		       "key=" + key +
+		       ", type=" + type +
+		       ", source=" + source +
 		       '}';
 	}
 }
