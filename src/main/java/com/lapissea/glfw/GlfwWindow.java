@@ -290,6 +290,7 @@ public class GlfwWindow{
 		private boolean       alwaysOnTop      = false;
 		private boolean       mousePassthrough = false;
 		private boolean       doubleBuffer     = false;
+		private boolean       focusOnShow      = false;
 		
 		private Initializer(){
 		}
@@ -328,6 +329,10 @@ public class GlfwWindow{
 		}
 		public Initializer doubleBuffer(boolean doubleBuffer){
 			this.doubleBuffer = doubleBuffer;
+			return this;
+		}
+		public Initializer focusOnShow(boolean focusOnShow){
+			this.focusOnShow = focusOnShow;
 			return this;
 		}
 		
@@ -379,6 +384,7 @@ public class GlfwWindow{
 		glfwWindowHintBool(GLFW_FLOATING, args.alwaysOnTop);
 		glfwWindowHintBool(GLFW_MOUSE_PASSTHROUGH, args.mousePassthrough);
 		glfwWindowHintBool(GLFW_DOUBLEBUFFER, args.doubleBuffer);
+		glfwWindowHintBool(GLFW_FOCUS_ON_SHOW, args.focusOnShow);
 		
 		args.api.preInit();
 	}
@@ -456,8 +462,7 @@ public class GlfwWindow{
 			if(visible.get()) maximized.dispatch(maximized.get());
 		}
 		cursorMode.dispatch(cursorMode.get());
-		focus();
-		focused.set(true);
+		focused.set(glfwGetWindowAttrib(handle, GLFW_FOCUSED) == GLFW_TRUE);
 	}
 	
 	public boolean isKeyDown(int key){
