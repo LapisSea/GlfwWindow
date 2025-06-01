@@ -6,7 +6,10 @@ import org.lwjgl.glfw.GLFWMonitorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
 
 import java.awt.geom.Rectangle2D;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.lwjgl.glfw.GLFW.*;
@@ -114,11 +117,9 @@ public class GlfwMonitor{
 	}
 	
 	
-	private static       GlfwMonitor       PRIMARY_MONITOR  = null;
-	private static final List<GlfwMonitor> MONITORS         = new ArrayList<>(1);
-	private static final List<GlfwMonitor> MONITORS_F       = Collections.unmodifiableList(MONITORS);
-	private static final List<Rect>        MONITOR_GROUPS   = new ArrayList<>(1);
-	private static final List<Rect>        MONITOR_GROUPS_F = Collections.unmodifiableList(MONITOR_GROUPS);
+	private static GlfwMonitor       PRIMARY_MONITOR = null;
+	private static List<GlfwMonitor> MONITORS        = List.of();
+	private static List<Rect>        MONITOR_GROUPS  = List.of();
 	
 	static void init(){
 		glfwInit();
@@ -127,21 +128,22 @@ public class GlfwMonitor{
 	}
 	
 	private static synchronized void update(){
-		MONITORS.clear();
-		MONITOR_GROUPS.clear();
-		PRIMARY_MONITOR = null;
+		List<GlfwMonitor> monitors      = new ArrayList<>(1);
+		List<Rect>        monitorGroups = new ArrayList<>(1);
 		
-		PointerBuffer monitors = glfwGetMonitors();
-		if(monitors == null) return;
-		for(int i = 0; i<monitors.capacity(); i++){
-			MONITORS.add(new GlfwMonitor(monitors.get(i)));
+		{
+			PointerBuffer monitorPtrs = glfwGetMonitors();
+			if(monitorPtrs == null || !monitorPtrs.hasRemaining()) return;
+			for(int i = 0; i<monitorPtrs.capacity(); i++){
+				monitors.add(new GlfwMonitor(monitorPtrs.get(i)));
+			}
 		}
 		
 		List<Rectangle2D> groups = new ArrayList<>(1);
 		
 		List<Rectangle2D> all = new ArrayList<>(1);
-		all.addAll(MONITORS.stream().map(a -> a.bounds).collect(Collectors.toList()));
-		for(GlfwMonitor m : MONITORS){
+		all.addAll(monitors.stream().map(a -> a.bounds).collect(Collectors.toList()));
+		for(GlfwMonitor m : monitors){
 			
 			Rectangle2D group  = new Rectangle2D.Float(m.bounds.x, m.bounds.y, m.bounds.width, m.bounds.height);
 			boolean     change = true;
@@ -179,9 +181,13 @@ public class GlfwMonitor{
 			if(!all.contains(group)) all.add(group);
 			
 		}
-		groups.stream().map(g -> new Rect((int)g.getX(), (int)g.getY(), (int)g.getWidth(), (int)g.getHeight())).forEach(MONITOR_GROUPS::add);
+		groups.stream().map(g -> new Rect((int)g.getX(), (int)g.getY(), (int)g.getWidth(), (int)g.getHeight())).forEach(monitorGroups::add);
+		
 		long ph = glfwGetPrimaryMonitor();
-		PRIMARY_MONITOR = MONITORS.stream().filter(m -> m.handle == ph).findAny().orElse(null);
+		PRIMARY_MONITOR = monitors.stream().filter(m -> m.handle == ph).findAny().orElse(null);
+		
+		MONITORS = List.copyOf(monitors);
+		MONITOR_GROUPS = List.copyOf(monitorGroups);
 	}
 	
 	public static synchronized GlfwMonitor getPrimaryMonitor(){
@@ -189,13 +195,8 @@ public class GlfwMonitor{
 		return PRIMARY_MONITOR;
 	}
 	
-	public static synchronized List<GlfwMonitor> getMonitors(){
-		return MONITORS_F;
-	}
-	
-	public static synchronized List<Rect> getGroups(){
-		return MONITOR_GROUPS_F;
-	}
+	public static synchronized List<GlfwMonitor> getMonitors(){ return MONITORS; }
+	public static synchronized List<Rect> getGroups()         { return MONITOR_GROUPS; }
 	
 	
 	/**

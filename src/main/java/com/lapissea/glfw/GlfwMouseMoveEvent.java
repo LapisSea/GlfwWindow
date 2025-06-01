@@ -4,8 +4,8 @@ import com.lapissea.vec.interf.IVec2iR;
 
 public class GlfwMouseMoveEvent extends GlfwEvent{
 	
-	private       IVec2iR delta;
-	private       IVec2iR position;
+	private final IVec2iR delta;
+	private final IVec2iR position;
 	private final IVec2iR prevPos = new IVec2iR(){
 		@Override
 		public int x(){
@@ -19,7 +19,7 @@ public class GlfwMouseMoveEvent extends GlfwEvent{
 	};
 	
 	GlfwMouseMoveEvent(GlfwWindow source, IVec2iR delta, IVec2iR position){
-		this.source = source;
+		super(source);
 		this.delta = delta;
 		this.position = position;
 	}

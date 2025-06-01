@@ -2,7 +2,8 @@ package com.lapissea.glfw;
 
 public class GlfwEvent{
 	
-	GlfwWindow source;
+	protected final GlfwWindow source;
+	public GlfwEvent(GlfwWindow source){ this.source = source; }
 	
 	public GlfwWindow getSource(){
 		return source;

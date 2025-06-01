@@ -14,6 +14,7 @@ import com.lapissea.vec.ChangeRegistryVec2i;
 import com.lapissea.vec.Vec2f;
 import com.lapissea.vec.Vec2i;
 import com.lapissea.vec.interf.IVec2iR;
+import org.lwjgl.BufferUtils;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFWCursorPosCallback;
 import org.lwjgl.glfw.GLFWImage;
@@ -23,11 +24,20 @@ import org.lwjgl.opengl.GL;
 
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.Reader;
+import java.io.Writer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -38,7 +48,6 @@ import static com.lapissea.glfw.GlfwWindow.Cursor.NORMAL;
 import static com.lapissea.util.UtilL.sleep;
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.system.MemoryUtil.NULL;
-import static org.lwjgl.system.MemoryUtil.memAlloc;
 
 @SuppressWarnings("unused")
 public class GlfwWindow{
@@ -477,12 +486,16 @@ public class GlfwWindow{
 	
 	public void setIcon(BufferedImage... images){
 		if(images.length == 0) return;
-		setIcon(Arrays.stream(images)
-		              .map(image -> {
-			              int w = image.getWidth(), h = image.getHeight();
-			              return GLFWImage.create().set(w, h, BuffUtil.imageToBuffer(image, memAlloc(w*h*4)));
-		              })
-		              .toArray(GLFWImage[]::new));
+		
+		GLFWImage[] gImages = new GLFWImage[images.length];
+		for(int i = 0; i<images.length; i++){
+			var image = images[i];
+			int w     = image.getWidth();
+			int h     = image.getHeight();
+			var bb    = BufferUtils.createByteBuffer(w*h*4);
+			gImages[i] = GLFWImage.create().set(w, h, BuffUtil.imageToBuffer(image, bb));
+		}
+		setIcon(gImages);
 	}
 	
 	public void setIcon(GLFWImage... images){

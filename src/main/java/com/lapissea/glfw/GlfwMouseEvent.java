@@ -6,11 +6,11 @@ public class GlfwMouseEvent extends GlfwEvent{
 		DOWN, UP, HOLD
 	}
 	
-	private int  key;
-	private Type type;
+	private final int  key;
+	private final Type type;
 	
 	GlfwMouseEvent(GlfwWindow source, int key, Type type){
-		this.source = source;
+		super(source);
 		this.key = key;
 		this.type = type;
 	}

@@ -4,7 +4,7 @@ import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
 
 @SuppressWarnings("PointlessBitwiseExpression")
-public class BuffUtil{
+public final class BuffUtil{
 	
 	public static ByteBuffer imageToBuffer(BufferedImage image, ByteBuffer buffer){
 		
@@ -21,9 +21,7 @@ public class BuffUtil{
 			}
 		}
 		
-		buffer.flip();
-		
-		return buffer;
+		return buffer.flip();
 	}
 	
 }
