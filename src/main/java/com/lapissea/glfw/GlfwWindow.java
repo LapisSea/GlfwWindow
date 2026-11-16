@@ -75,13 +75,24 @@ public class GlfwWindow{
 	
 	protected long handle = NULL;
 	
+	private boolean syncingFromOS;
+	private void syncFromOS(Runnable update){
+		boolean prev = syncingFromOS;
+		syncingFromOS = true;
+		try{
+			update.run();
+		}finally{
+			syncingFromOS = prev;
+		}
+	}
+	
 	public final ChangeRegistry<String> title = new ChangeRegistry<>("", tit/*ty*/ -> {
 		if(isCreated()) glfwSetWindowTitle(handle, tit);
 		
 	});
 	
 	public final ChangeRegistryBool maximized = new ChangeRegistryBool(false, max -> {
-		if(!isCreated() && !isFullScreen()) return;
+		if(syncingFromOS || !isCreated() && !isFullScreen()) return;
 		if(max) glfwMaximizeWindow(handle);
 		else glfwRestoreWindow(handle);
 	});
@@ -96,12 +107,12 @@ public class GlfwWindow{
 	});
 	
 	public final ChangeRegistryVec2i size = new ChangeRegistryVec2i(600, 400, siz -> {
-		if(isCreated() && !isFullScreen()) glfwSetWindowSize(handle, siz.x(), siz.y());
+		if(!syncingFromOS && isCreated() && !isFullScreen()) glfwSetWindowSize(handle, siz.x(), siz.y());
 	});
 	
 	private final Vec2i restorePos = new Vec2i(), restoreSize = new Vec2i();
 	public final ChangeRegistryVec2i pos = new ChangeRegistryVec2i(-1, -1, p -> {
-		if(isCreated() && !isFullScreen()) glfwSetWindowPos(handle, p.x(), p.y());
+		if(!syncingFromOS && isCreated() && !isFullScreen()) glfwSetWindowPos(handle, p.x(), p.y());
 	}){
 		
 		@Override
@@ -401,15 +412,15 @@ public class GlfwWindow{
 		
 		glfwSetWindowMaximizeCallback(handle, (window, maximized) -> {
 			if(window != handle) return;
-			this.maximized.set(maximized);
+			syncFromOS(() -> this.maximized.set(maximized));
 		});
 		glfwSetWindowSizeCallback(handle, (window, w, h) -> {
 			if(window != handle) return;
-			size.set(w, h);
+			syncFromOS(() -> size.set(w, h));
 		});
 		glfwSetWindowPosCallback(handle, (window, xpos, ypos) -> {
 			if(window != handle) return;
-			pos.set(xpos, ypos);
+			syncFromOS(() -> pos.set(xpos, ypos));
 		});
 		glfwSetWindowFocusCallback(handle, (window, focused) -> {
 			if(window != handle) return;
