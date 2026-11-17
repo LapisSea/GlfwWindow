@@ -2,10 +2,7 @@ package com.lapissea.glfw;
 
 import org.testng.annotations.Test;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.file.Files;
-import java.util.HexFormat;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNull;

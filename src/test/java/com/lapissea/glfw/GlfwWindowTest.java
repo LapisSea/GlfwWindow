@@ -134,6 +134,22 @@ public class GlfwWindowTest{
 	}
 
 	@Test
+	public void positionStaysCurrentAcrossRequests(){
+		if(glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) throw new SkipException("Wayland has no window positions");
+		var w = window(320, 240);
+		create(w);
+		try{
+			pollUntil(w::isVisible, "visible");
+			settle(200);
+			w.setSize(340, 260);
+			settle(200);
+			int[] x = {0}, y = {0};
+			glfwGetWindowPos(w.getHandle(), x, y);
+			assertEquals(w.pos(), new Point(x[0], y[0]));
+		}finally{ w.destroy(); }
+	}
+	
+	@Test
 	public void normalGeometrySurvivesMaximize(){
 		var w = window(330, 250);
 		create(w);

@@ -186,9 +186,9 @@ public class GlfwWindow{
 		}
 		
 		if(hasPositions() && fullScreenMonitor == null){
-			var poz = getSizePtr(GLFW::glfwGetWindowSize);
-			if(pos == null || poz.width() != pos.x() || poz.height() != pos.y()){
-				int x = poz.width(), y = poz.height();
+			var poz = getPointPtr(GLFW::glfwGetWindowPos);
+			if(!poz.equals(pos)){
+				int x = poz.x(), y = poz.y();
 				callbacks.windowPos.dispatch(l -> l.invoke(handle, x, y));
 			}
 		}
