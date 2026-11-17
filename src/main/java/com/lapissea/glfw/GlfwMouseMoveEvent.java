@@ -1,38 +1,16 @@
 package com.lapissea.glfw;
 
-import com.lapissea.vec.interf.IVec2iR;
-
 public class GlfwMouseMoveEvent extends GlfwEvent{
 	
-	private final IVec2iR delta;
-	private final IVec2iR position;
-	private final IVec2iR prevPos = new IVec2iR(){
-		@Override
-		public int x(){
-			return position.x() - delta.x();
-		}
-		
-		@Override
-		public int y(){
-			return position.y() - delta.y();
-		}
-	};
+	private final Point position, prevPos;
 	
-	GlfwMouseMoveEvent(GlfwWindow source, IVec2iR delta, IVec2iR position){
+	GlfwMouseMoveEvent(GlfwWindow source, Point prevPos, Point position){
 		super(source);
-		this.delta = delta;
+		this.prevPos = prevPos;
 		this.position = position;
 	}
 	
-	public IVec2iR getDelta(){
-		return delta;
-	}
-	
-	public IVec2iR getPosition(){
-		return position;
-	}
-	
-	public IVec2iR getPrevPos(){
-		return prevPos;
-	}
+	public Point getPosition(){ return position; }
+	public Point getPrevPos() { return prevPos; }
+	public Point getDelta()   { return new Point(position.x() - prevPos.x(), position.y() - prevPos.y()); }
 }

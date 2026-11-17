@@ -1,6 +1,5 @@
 package com.lapissea.glfw;
 
-import com.lapissea.util.PairM;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFWMonitorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
@@ -9,7 +8,6 @@ import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.lwjgl.glfw.GLFW.*;
@@ -198,6 +196,30 @@ public class GlfwMonitor{
 	public static synchronized List<GlfwMonitor> getMonitors(){ return MONITORS; }
 	public static synchronized List<Rect> getGroups()         { return MONITOR_GROUPS; }
 	
+	public static GlfwMonitor bestMonitor(Rectangle2D.Float rect){
+		if(rect != null){
+			GlfwMonitor best        = null;
+			double      bestOverlap = 0;
+			
+			for(var monitor : getMonitors()){
+				var    overlapRect = rect.createIntersection(monitor.bounds);
+				double overlap     = Math.max(0, overlapRect.getWidth())*Math.max(0, overlapRect.getHeight());
+				if(bestOverlap<overlap){
+					best = monitor;
+					bestOverlap = overlap;
+				}
+			}
+			if(best != null){
+				return best;
+			}
+		}
+		
+		try{
+			return GlfwMonitor.getPrimaryMonitor();
+		}catch(IllegalStateException e){
+			return null;
+		}
+	}
 	
 	/**
 	 * @return true if rectangle has been modified
@@ -208,14 +230,12 @@ public class GlfwMonitor{
 		}
 		
 		if(getGroups().stream().noneMatch(group -> group.contains(windowRect))){
+			Rect group = getGroups().stream().max(Comparator.comparingDouble(gr -> {
+				var overlap = new Rectangle2D.Double(gr.getX(), gr.getY(), windowRect.getWidth(), windowRect.getHeight()).createIntersection(gr);
+				return overlap.getWidth()*overlap.getHeight();
+			})).orElse(null);
 			
-			Optional<PairM<Rect, Rectangle2D>> r =
-				getGroups().stream()
-				           .map(group -> new PairM<>(group, new Rectangle2D.Double(group.getX(), group.getY(), windowRect.getWidth(), windowRect.getHeight()).createIntersection(group)))
-				           .max(Comparator.comparingDouble(a -> a.obj2.getWidth()*a.obj2.getHeight()));
-			if(r.isPresent()){
-				Rect group = r.get().obj1;
-				
+			if(group != null){
 				double x, y,
 					w = Math.min(windowRect.getWidth(), group.getWidth()),
 					h = Math.min(windowRect.getHeight(), group.getHeight());
@@ -237,19 +257,23 @@ public class GlfwMonitor{
 		return false;
 	}
 	
-	//////////////////////////////////////////////////////////////////
-	//////////////////////////////////////////////////////////////////
+	//*///////////////////////////////////////////////////////////////
+	//*///////////////////////////////////////////////////////////////
 	
-	final        long handle;
-	public final int  refreshRate;
-	public final Rect bounds;
-	
+	final        long   handle;
+	public final int    refreshRate;
+	public final Rect   bounds;
+	//Not always unique
+	public final String name;
 	
 	public GlfwMonitor(long handle){
 		this.handle = handle;
-		
+		name = glfwGetMonitorName(handle);
 		
 		GLFWVidMode mode = glfwGetVideoMode(handle);
+		if(mode == null){
+			throw new IllegalStateException("Unable to get monitor info! Handle: " + handle);
+		}
 		
 		refreshRate = mode.refreshRate();
 		
@@ -265,15 +289,14 @@ public class GlfwMonitor{
 	
 	@Override
 	public boolean equals(Object obj){
-		if(obj == this) return true;
-		if(!(obj instanceof GlfwMonitor)) return false;
-		GlfwMonitor other = (GlfwMonitor)obj;
-		return other.handle == handle;
+		return obj == this ||
+		       obj instanceof GlfwMonitor other &&
+		       other.handle == handle;
 	}
 	
 	@Override
 	public String toString(){
-		return "GlfwMonitor{refreshRate=" + refreshRate + ", bounds=" + bounds + "}";
+		return "GlfwMonitor{" + name + ", refreshRate=" + refreshRate + ", bounds=" + bounds + "}";
 	}
 	
 }

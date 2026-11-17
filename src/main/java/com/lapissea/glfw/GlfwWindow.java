@@ -1,54 +1,40 @@
 package com.lapissea.glfw;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
-import com.lapissea.util.LogUtil;
-import com.lapissea.util.NotNull;
-import com.lapissea.util.TextUtil;
-import com.lapissea.util.UtilL;
-import com.lapissea.util.event.EventRegistry;
-import com.lapissea.util.event.change.ChangeRegistry;
-import com.lapissea.util.event.change.ChangeRegistryBool;
-import com.lapissea.vec.ChangeRegistryVec2i;
-import com.lapissea.vec.Vec2f;
-import com.lapissea.vec.Vec2i;
-import com.lapissea.vec.interf.IVec2iR;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.PointerBuffer;
-import org.lwjgl.glfw.GLFWCursorPosCallback;
+import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWImage;
-import org.lwjgl.glfw.GLFWKeyCallback;
-import org.lwjgl.glfw.GLFWMouseButtonCallback;
 import org.lwjgl.opengl.GL;
 
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.Reader;
-import java.io.Writer;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.IntBuffer;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import static com.lapissea.glfw.GlfwKeyboardEvent.Type.DOWN;
-import static com.lapissea.glfw.GlfwWindow.Cursor.NORMAL;
-import static com.lapissea.util.UtilL.sleep;
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.system.MemoryUtil.NULL;
 
+/**
+ * A GLFW window.
+ * <p>
+ * State getters ({@link #size()}, {@link #isMaximized()}, ...) report the window's state as last reported by the
+ * platform. Requests ({@link #setSize(int, int)}, {@link #maximize()}, ...) always go through GLFW and take effect when the
+ * platform applies them \u2014 on some platforms, several events later. Before {@link #init()}, the same requests configure
+ * how the window is created instead.
+ * <p>
+ * As with GLFW itself, everything except reading state must happen on the main thread. Listen to events through
+ * {@link #callbacks()} or the higher-level {@code on*} methods, never by setting GLFW callbacks on
+ * {@link #getHandle()} directly.
+ */
 @SuppressWarnings("unused")
 public class GlfwWindow{
 	
@@ -61,128 +47,233 @@ public class GlfwWindow{
 		GlfwMonitor.init();
 	}
 	
+	public enum FullScreenStyle{
+		EXCLUSIVE,
+		BORDERLESS
+	}
+	
 	public enum Cursor{
 		NORMAL(GLFW_CURSOR_NORMAL),
 		HIDDEN(GLFW_CURSOR_HIDDEN),
-		DISABLED(GLFW_CURSOR_DISABLED);
+		DISABLED(GLFW_CURSOR_DISABLED),
+		CAPTURED(GLFW_CURSOR_CAPTURED),
+		;
 		
-		private final int handle;
+		private final int flag;
 		
-		Cursor(int handle){
-			this.handle = handle;
-		}
+		Cursor(int flag){ this.flag = flag; }
 	}
 	
 	protected long handle = NULL;
 	
-	private boolean syncingFromOS;
-	private void syncFromOS(Runnable update){
-		boolean prev = syncingFromOS;
-		syncingFromOS = true;
-		try{
-			update.run();
-		}finally{
-			syncingFromOS = prev;
-		}
-	}
+	private final GlfwCallbacks callbacks = new GlfwCallbacks();
 	
-	public final ChangeRegistry<String> title = new ChangeRegistry<>("", tit/*ty*/ -> {
-		if(isCreated()) glfwSetWindowTitle(handle, tit);
-		
-	});
+	private final Listeners<Consumer<GlfwKeyboardEvent>>  keyEvents         = new Listeners<>();
+	private final Listeners<Consumer<GlfwMouseEvent>>     mouseButtonEvents = new Listeners<>();
+	private final Listeners<Consumer<GlfwMouseMoveEvent>> mouseMoveEvents   = new Listeners<>();
+	private final Listeners<Consumer<GlfwScrollEvent>>    scrollEvents      = new Listeners<>();
+	private final Listeners<Runnable>                     placementChanges  = new Listeners<>();
 	
-	public final ChangeRegistryBool maximized = new ChangeRegistryBool(false, max -> {
-		if(syncingFromOS || !isCreated() && !isFullScreen()) return;
-		if(max) glfwMaximizeWindow(handle);
-		else glfwRestoreWindow(handle);
-	});
+	private String title = "";
 	
-	public final ChangeRegistryBool visible = new ChangeRegistryBool(false, vis -> {
-		if(!isCreated() && !isFullScreen()) return;
-		if(vis){
-			moveToVisible();
-			glfwShowWindow(handle);
-		}else glfwHideWindow(handle);
-		if(maximized.get()) glfwMaximizeWindow(handle);
-	});
+	private Size  size = new Size(600, 400);
+	private Point pos;
 	
-	public final ChangeRegistryVec2i size = new ChangeRegistryVec2i(600, 400, siz -> {
-		if(!syncingFromOS && isCreated() && !isFullScreen()) glfwSetWindowSize(handle, siz.x(), siz.y());
-	});
+	private boolean maximized;
+	private boolean iconified;
+	private boolean focused;
 	
-	private final Vec2i restorePos = new Vec2i(), restoreSize = new Vec2i();
-	public final ChangeRegistryVec2i pos = new ChangeRegistryVec2i(-1, -1, p -> {
-		if(!syncingFromOS && isCreated() && !isFullScreen()) glfwSetWindowPos(handle, p.x(), p.y());
-	}){
-		
-		@Override
-		public ChangeRegistryVec2i set(int x, int y){
-			
-			if(x == -1 && y == -1){
-				GlfwMonitor monitor = GlfwMonitor.getPrimaryMonitor();
-				
-				super.set((int)monitor.bounds.getCenterX() - size.x()/2, (int)monitor.bounds.getCenterY() - size.y()/2);
-				return this;
-			}
-			
-			super.set(x, y);
-			return this;
-		}
-	};
+	private GlfwMonitor     fullScreenMonitor;
+	private FullScreenStyle fullScreenStyle        = FullScreenStyle.EXCLUSIVE;
+	private FullScreenStyle defaultFullScreenStyle = FullScreenStyle.EXCLUSIVE;
+	private boolean         decoratedBeforeFullScreen;
 	
-	private      boolean            iconifiedEventFlag;
-	public final ChangeRegistryBool iconified = new ChangeRegistryBool(false, vis -> {
-		if(iconifiedEventFlag){
-			iconifiedEventFlag = false;
-			return;
-		}
-		
-		if(!isCreated() && !isFullScreen()) return;
-		if(vis) glfwIconifyWindow(handle);
-		else glfwRestoreWindow(handle);
-		if(maximized.get()) glfwMaximizeWindow(handle);
-	});
+	private boolean visibleOnCreate;
 	
-	public final ChangeRegistry<GlfwMonitor> monitor = new ChangeRegistry<GlfwMonitor>(monitor -> {
-		if(!isCreated()) return;
-		if(monitor == null) glfwSetWindowMonitor(handle, 0, restorePos.x(), restorePos.y(), restoreSize.x(), restoreSize.y(), 0);
-		else{
-			restorePos.set(pos);
-			restoreSize.set(size);
-			glfwSetWindowMonitor(handle, monitor.handle, pos.x(), pos.y(), monitor.bounds.width, monitor.bounds.height, monitor.refreshRate);
-		}
-	});
+	private BorderlessCover borderlessCover;
+	private boolean         borderlessOversize;
+	private Cursor          cursorMode = Cursor.NORMAL;
+	private Point           cursorPos  = new Point(0, 0);
 	
-	private final Vec2i               mousePosControl = new Vec2i();
-	public final  ChangeRegistryVec2i mousePos        = new ChangeRegistryVec2i(pos -> {
-		if(mousePosControl.equals(pos)) return;
-		mousePosControl.set(pos);
-		glfwSetCursorPos(handle, pos.x(), pos.y());
-	});
-	
-	public final ChangeRegistryBool focused = new ChangeRegistryBool(false);
-	
-	public static class KeyboardEventRegistry extends EventRegistry<GlfwKeyboardEvent>{
-		
-		public boolean register(int key, GlfwKeyboardEvent.Type type, @NotNull Consumer<GlfwKeyboardEvent> listener){
-			return register(e -> { if(e.getKey() == key && e.getType() == type) listener.accept(e); });
-		}
-	}
-	
-	public final KeyboardEventRegistry             registryKeyboardKey = new KeyboardEventRegistry();
-	public final EventRegistry<GlfwMouseEvent>     registryMouseButton = new EventRegistry<>();
-	public final EventRegistry<GlfwMouseMoveEvent> registryMouseMove   = new EventRegistry<>();
-	public final EventRegistry<Vec2f>              registryMouseScroll = new EventRegistry<>();
-	
-	public final ChangeRegistry<Cursor> cursorMode = new ChangeRegistry<>(NORMAL, state -> {
-		if(!isCreated()) return;
-		glfwSetInputMode(handle, GLFW_CURSOR, state.handle);
-	});
+	private Point normalPos, prevNormalPos;
+	private Size normalSize, prevNormalSize;
+	private long normalPosChangedNs, normalSizeChangedNs;
+	private boolean maximizedBeforeIconify, maximizedBeforeFullScreen;
 	
 	private final ArrayList<Runnable> onDestroy = new ArrayList<>(1);
 	
+	@SuppressWarnings("resource")
+	public GlfwWindow(){
+		callbacks.windowPos.add((w, x, y) -> {
+			pos = new Point(x, y);
+			if(inNormalState()){
+				prevNormalPos = normalPos;
+				normalPos = pos;
+				normalPosChangedNs = System.nanoTime();
+			}
+			placementChanged();
+			syncModeFromGlfw();
+		});
+		callbacks.windowSize.add((w, width, height) -> {
+			size = new Size(width, height);
+			if(justUnmaximized()){
+				enforceNormalSize();
+			}else if(inNormalState() && !size.isEmpty()){
+				prevNormalSize = normalSize;
+				normalSize = size;
+				normalSizeChangedNs = System.nanoTime();
+			}
+			placementChanged();
+			syncModeFromGlfw();
+		});
+		callbacks.windowMaximize.add((w, max) -> {
+			boolean was = maximized;
+			maximized = max;
+			if(max) undoRecentNormalChange();
+			else if(was){
+				unmaximizedNs = System.nanoTime();
+				enforceNormalSize();
+			}
+			placementChanged();
+		});
+		callbacks.windowIconify.add((w, ico) -> {
+			if(ico) maximizedBeforeIconify = maximized;
+			iconified = ico;
+			placementChanged();
+		});
+		callbacks.windowFocus.add((w, f) -> focused = f);
+		callbacks.key.add((w, key, scancode, action, mods) -> {
+			var type = action == GLFW_PRESS? GlfwKeyboardEvent.Type.DOWN :
+			           action == GLFW_REPEAT? GlfwKeyboardEvent.Type.HOLD : GlfwKeyboardEvent.Type.UP;
+			if(!keyEvents.isEmpty()){
+				var e = new GlfwKeyboardEvent(this, key, type);
+				keyEvents.dispatch(l -> l.accept(e));
+			}
+		});
+		callbacks.mouseButton.add((w, button, action, mods) -> {
+			if(mouseButtonEvents.isEmpty()) return;
+			var type = action == GLFW_PRESS? GlfwMouseEvent.Type.DOWN :
+			           action == GLFW_REPEAT? GlfwMouseEvent.Type.HOLD : GlfwMouseEvent.Type.UP;
+			var e = new GlfwMouseEvent(this, button, type);
+			mouseButtonEvents.dispatch(l -> l.accept(e));
+		});
+		callbacks.cursorPos.add((w, x, y) -> {
+			var prev = cursorPos;
+			cursorPos = new Point((int)x, (int)y);
+			if(!mouseMoveEvents.isEmpty()){
+				var e = new GlfwMouseMoveEvent(this, prev, cursorPos);
+				mouseMoveEvents.dispatch(l -> l.accept(e));
+			}
+		});
+		callbacks.scroll.add((w, x, y) -> {
+			if(scrollEvents.isEmpty()) return;
+			var e = new GlfwScrollEvent(this, x, y);
+			scrollEvents.dispatch(l -> l.accept(e));
+		});
+	}
 	
-	public static class Initializer{
+	/**
+	 * Some platforms omit size events (e.g., Wayland for self-initiated resizes, X11 for windows created maximized).
+	 * If GLFW already reflects the change, the missing event is synthesized here so listeners observe consistent behavior.
+	 */
+	private void syncFromGlfw(){
+		if(!isCreated()) return;
+		
+		var siz = getSizePtr(GLFW::glfwGetWindowSize);
+		if(siz.width() != size.width() || siz.height() != size.height()){
+			int w = siz.width(), h = siz.height();
+			callbacks.windowSize.dispatch(l -> l.invoke(handle, w, h));
+		}
+		
+		if(hasPositions() && fullScreenMonitor == null){
+			var poz = getSizePtr(GLFW::glfwGetWindowSize);
+			if(pos == null || poz.width() != pos.x() || poz.height() != pos.y()){
+				int x = poz.width(), y = poz.height();
+				callbacks.windowPos.dispatch(l -> l.invoke(handle, x, y));
+			}
+		}
+		
+		syncModeFromGlfw();
+	}
+	
+	private void syncModeFromGlfw(){
+		boolean max = glfwGetWindowAttrib(handle, GLFW_MAXIMIZED) == GLFW_TRUE;
+		if(max != maximized){
+			callbacks.windowMaximize.dispatch(l -> l.invoke(handle, max));
+		}
+		boolean ico = glfwGetWindowAttrib(handle, GLFW_ICONIFIED) == GLFW_TRUE;
+		if(ico != iconified){
+			callbacks.windowIconify.dispatch(l -> l.invoke(handle, ico));
+		}
+	}
+	
+	private long    unmaximizedNs;
+	private boolean enforcingNormalSize;
+	
+	private boolean justUnmaximized(){
+		return unmaximizedNs != 0 && System.nanoTime() - unmaximizedNs<500_000_000L;
+	}
+	
+	/**
+	 * Some platforms do not restore the pre-maximize size (GLFW on Wayland keeps the maximized size, X11 window managers may subtract the frame from a window created maximized).
+	 * Sizes reported right after unmaximizing are corrected to the remembered pre-maximize value.
+	 */
+	private void enforceNormalSize(){
+		if(enforcingNormalSize || maximized || iconified || fullScreenMonitor != null) return;
+		if(normalSize == null || normalSize.equals(size) || !isCreated()) return;
+		if(glfwGetWindowAttrib(handle, GLFW_MAXIMIZED) == GLFW_TRUE) return;
+		
+		enforcingNormalSize = true;
+		try{
+			glfwSetWindowSize(handle, normalSize.width(), normalSize.height());
+			syncFromGlfw();
+		}finally{
+			enforcingNormalSize = false;
+		}
+	}
+	
+	private boolean inNormalState(){
+		if(maximized || iconified || fullScreenMonitor != null) return false;
+		return !isCreated() ||
+		       glfwGetWindowAttrib(handle, GLFW_MAXIMIZED) == GLFW_FALSE &&
+		       glfwGetWindowAttrib(handle, GLFW_ICONIFIED) == GLFW_FALSE;
+	}
+	
+	/// The geometry reported just before maximizing was most likely already maximized geometry
+	private void undoRecentNormalChange(){
+		long recent = System.nanoTime() - 100_000_000L;
+		if(prevNormalSize != null && normalSizeChangedNs>recent && normalSize.equals(size)) normalSize = prevNormalSize;
+		if(prevNormalPos != null && normalPosChangedNs>recent && normalPos.equals(pos)) normalPos = prevNormalPos;
+	}
+	private void placementChanged(){
+		placementChanges.dispatch(Runnable::run);
+	}
+	
+	//=============== Events ================//
+	
+	/// Usable before {@link #init}.
+	public GlfwCallbacks callbacks(){ return callbacks; }
+	
+	public Registration onKey(Consumer<GlfwKeyboardEvent> listener){ return keyEvents.add(listener); }
+	public Registration onKey(int key, GlfwKeyboardEvent.Type type, Consumer<GlfwKeyboardEvent> listener){
+		Objects.requireNonNull(type);
+		Objects.requireNonNull(listener);
+		return keyEvents.add(e -> {
+			if(e.getKey() == key && e.getType() == type){
+				listener.accept(e);
+			}
+		});
+	}
+	
+	public Registration onMouseButton(Consumer<GlfwMouseEvent> listener)  { return mouseButtonEvents.add(listener); }
+	public Registration onMouseMove(Consumer<GlfwMouseMoveEvent> listener){ return mouseMoveEvents.add(listener); }
+	public Registration onScroll(Consumer<GlfwScrollEvent> listener)      { return scrollEvents.add(listener); }
+	/// Called on window, moved, resized, maximized, minimized or restored
+	public Registration onPlacementChange(Runnable listener){ return placementChanges.add(listener); }
+	
+	//=============== Creation ================//
+	
+	public static final class Initializer{
 		
 		private interface SurfaceAPI<SELF extends SurfaceAPI<SELF>>{
 			void preInit();
@@ -230,15 +321,16 @@ public class GlfwWindow{
 			public void preInit(){
 				glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
 				if(samples>1) glfwWindowHint(GLFW_SAMPLES, samples);
-			}
-			@Override
-			public void postInit(GlfwWindow window){
-				window.grabContext();
 				glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, versionMajor);
 				glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, versionMinor);
-				glfwWindowHintBool(GLFW_OPENGL_FORWARD_COMPAT, forwardCompatible);
+				hint(GLFW_OPENGL_FORWARD_COMPAT, forwardCompatible);
 				glfwWindowHint(GLFW_OPENGL_PROFILE, profile.handle);
-				glfwWindowHintBool(GLFW_OPENGL_DEBUG_CONTEXT, debugContext);
+				hint(GLFW_OPENGL_DEBUG_CONTEXT, debugContext);
+			}
+			
+			@Override
+			public void postInit(GlfwWindow window){
+				window.makeContextCurrent();
 				GL.createCapabilities();
 			}
 			
@@ -273,25 +365,16 @@ public class GlfwWindow{
 		
 		private static final class VulkanImpl implements VulkanSurfaceAPI{
 			
-			private int versionMajor = 1;
-			private int versionMinor = 1;
-			
 			@Override
 			public void preInit(){
 				glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 			}
 			@Override
-			public void postInit(GlfwWindow window){
-				glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, versionMajor);
-				glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, versionMinor);
-			}
+			public void postInit(GlfwWindow window){ }
 			
+			//Retained only for source compatibility. The Vulkan version is chosen at Vulkan instance creation
 			@Override
-			public VulkanSurfaceAPI withVersion(int major, int minor){
-				versionMajor = major;
-				versionMinor = minor;
-				return this;
-			}
+			public VulkanSurfaceAPI withVersion(int major, int minor){ return this; }
 		}
 		
 		private SurfaceAPI<?> api              = new OpenGLImpl();
@@ -305,7 +388,6 @@ public class GlfwWindow{
 		
 		private Initializer(){
 		}
-		
 		
 		public Initializer withVulkan(){ return withVulkan(Function.identity()); }
 		public Initializer withVulkan(Function<VulkanSurfaceAPI, VulkanSurfaceAPI> settings){
@@ -346,158 +428,491 @@ public class GlfwWindow{
 			this.focusOnShow = focusOnShow;
 			return this;
 		}
-		
 	}
 	
 	public GlfwWindow init()                                        { return init(new Initializer()); }
 	public GlfwWindow init(Function<Initializer, Initializer> setup){ return init(setup.apply(new Initializer())); }
 	
 	private GlfwWindow init(Initializer args){
-		pos.set(pos);
-		moveToVisible();
-		preInit(args);
+		if(isCreated()) throw new IllegalStateException("Already created");
 		
-		if(isFullScreen()){
-			GlfwMonitor monitor = this.monitor.get();
-			handle = glfwCreateWindow(monitor.bounds.width, monitor.bounds.height, "", monitor.handle, handle);
-		}else handle = glfwCreateWindow(100, 100, "", NULL, handle);
+		hint(GLFW_RESIZABLE, args.resizeable);
+		hint(GLFW_DECORATED, args.decorated);
+		
+		// Show when done, after window is fully initialized
+		hint(GLFW_VISIBLE, false);
+		
+		hint(GLFW_TRANSPARENT_FRAMEBUFFER, args.transparent);
+		hint(GLFW_FLOATING, args.alwaysOnTop);
+		hint(GLFW_MOUSE_PASSTHROUGH, args.mousePassthrough);
+		hint(GLFW_DOUBLEBUFFER, args.doubleBuffer);
+		hint(GLFW_FOCUS_ON_SHOW, args.focusOnShow);
+		
+		// Maximized after placement:
+		// moving a window that is already maximized drags it off its monitor, instead of the placement becoming the geometry it restores to.
+		hint(GLFW_MAXIMIZED, false);
+		
+		var fullScreenOn = fullScreenMonitor;
+		var fullStyle    = fullScreenStyle;
+		
+		fullScreenMonitor = null;
+		boolean createMaximized = maximized;
+		
+		args.api.preInit();
+		
+		handle = glfwCreateWindow(size.width(), size.height(), title, NULL, NULL);
+		if(handle == NULL) throw new IllegalStateException("Failed to create window");
+		
 		if(args.api instanceof Initializer.VulkanSurfaceAPI){
 			glfwSetWindowSizeLimits(handle, 1, 1, GLFW_DONT_CARE, GLFW_DONT_CARE);
 		}
-		initProps();
+		
+		normalSize = size;
+		if(fullScreenMonitor == null && hasPositions()){
+			if(pos == null){
+				var m = bestMonitor();
+				if(m != null){
+					pos = new Point(
+						(int)m.bounds.getCenterX() - size.width()/2,
+						(int)m.bounds.getCenterY() - size.height()/2
+					);
+				}
+			}
+			if(pos != null){
+				glfwSetWindowPos(handle, pos.x(), pos.y());
+				placeOnShow = pos;
+			}
+			normalPos = pos;
+		}
+		
+		callbacks.install(handle);
+		readState();
+		
+		if(!maximized && fullScreenMonitor == null){
+			normalSize = size;
+			if(pos != null) normalPos = pos;
+		}
+		
+		glfwSetInputMode(handle, GLFW_CURSOR, cursorMode.flag);
+		if(createMaximized){
+			maximize();
+		}
+		
+		if(fullScreenOn != null){
+			if(glfwGetPlatform() != GLFW_PLATFORM_WIN32 && !isVisible()){
+				fullScreenOnShow = fullScreenOn;
+			}else setFullScreen(fullScreenOn, fullStyle);
+			fullScreenStyle = fullStyle;
+		}
 		
 		args.api.postInit(this);
+		
+		if(visibleOnCreate) show();
+		else syncFromGlfw();
 		
 		return this;
 	}
 	
-	private void moveToVisible(){
+	private boolean     maximizeOnShow;
+	private Point       placeOnShow;
+	private GlfwMonitor fullScreenOnShow;
+	
+	private void correctPlacement(){
+		var target = placeOnShow;
+		placeOnShow = null;
 		
-		Rectangle2D windowRect = new Rectangle2D.Float();
-		windowRect.setRect(pos.x(), pos.y(), size.x(), size.y());
+		if(target == null || glfwGetPlatform() != GLFW_PLATFORM_X11) return;
 		
-		if(GlfwMonitor.moveToVisible(windowRect)){
-			pos.set((int)windowRect.getX(), (int)windowRect.getY());
-			size.set((int)windowRect.getWidth(), (int)windowRect.getHeight());
+		int[] x = {0}, y = {0};
+		glfwGetWindowPos(handle, x, y);
+		
+		if(x[0] != target.x() || y[0] != target.y()){
+			glfwSetWindowPos(handle, target.x(), target.y());
 		}
 	}
 	
-	public boolean isFullScreen(){
-		return monitor.get() != null;
+	private static boolean maximizesOnShow(){
+		var p = glfwGetPlatform();
+		return p == GLFW_PLATFORM_WIN32 || p == GLFW_PLATFORM_X11;
 	}
 	
-	private void preInit(Initializer args){
-		glfwWindowHintBool(GLFW_RESIZABLE, args.resizeable);
-		glfwWindowHintBool(GLFW_DECORATED, args.decorated);
-		if(isFullScreen()) glfwWindowHintBool(GLFW_VISIBLE, true);
-		glfwWindowHintBool(GLFW_VISIBLE, visible.get());
-		glfwWindowHintBool(GLFW_TRANSPARENT_FRAMEBUFFER, args.transparent);
-		glfwWindowHintBool(GLFW_FLOATING, args.alwaysOnTop);
-		glfwWindowHintBool(GLFW_MOUSE_PASSTHROUGH, args.mousePassthrough);
-		glfwWindowHintBool(GLFW_DOUBLEBUFFER, args.doubleBuffer);
-		glfwWindowHintBool(GLFW_FOCUS_ON_SHOW, args.focusOnShow);
+	private void readState(){
+		size = getSizePtr(GLFW::glfwGetWindowSize);
 		
-		args.api.preInit();
-	}
-	
-	private static void glfwWindowHintBool(int prop, boolean val){
-		glfwWindowHint(prop, glBool(val));
-	}
-	private static int glBool(boolean val){
-		return val? GLFW_TRUE : GLFW_FALSE;
-	}
-	
-	@SuppressWarnings("resource")
-	protected void initProps(){
-		
-		glfwSetWindowMaximizeCallback(handle, (window, maximized) -> {
-			if(window != handle) return;
-			syncFromOS(() -> this.maximized.set(maximized));
-		});
-		glfwSetWindowSizeCallback(handle, (window, w, h) -> {
-			if(window != handle) return;
-			syncFromOS(() -> size.set(w, h));
-		});
-		glfwSetWindowPosCallback(handle, (window, xpos, ypos) -> {
-			if(window != handle) return;
-			syncFromOS(() -> pos.set(xpos, ypos));
-		});
-		glfwSetWindowFocusCallback(handle, (window, focused) -> {
-			if(window != handle) return;
-			this.focused.set(focused);
-		});
-		glfwSetWindowIconifyCallback(handle, (window, iconified) -> {
-			if(window != handle) return;
-			iconifiedEventFlag = true;
-			this.iconified.set(iconified);
-		});
-		
-		glfwSetKeyCallback(handle, GLFWKeyCallback.create((window, key, scancode, action, mods) -> {
-			if(window != handle) return;
-			GlfwKeyboardEvent.Type type;
-			
-			if(action == GLFW_PRESS) type = DOWN;
-			else if(action == GLFW_REPEAT) type = GlfwKeyboardEvent.Type.HOLD;
-			else type = GlfwKeyboardEvent.Type.UP;
-			
-			registryKeyboardKey.dispatch(new GlfwKeyboardEvent(this, key, type));
-		}));
-		glfwSetMouseButtonCallback(handle, GLFWMouseButtonCallback.create((window, button, action, mods) -> {
-			if(window != handle) return;
-			
-			GlfwMouseEvent.Type type;
-			if(action == GLFW_PRESS) type = GlfwMouseEvent.Type.DOWN;
-			else if(action == GLFW_REPEAT) type = GlfwMouseEvent.Type.HOLD;
-			else type = GlfwMouseEvent.Type.UP;
-			
-			registryMouseButton.dispatch(new GlfwMouseEvent(this, button, type));
-		}));
-		glfwSetCursorPosCallback(handle, GLFWCursorPosCallback.create((window, xpos, ypos) -> {
-			if(window != handle) return;
-			mousePosControl.set((int)xpos, (int)ypos);
-			Vec2i delta = mousePosControl.clone().sub(mousePos);
-			mousePos.set(mousePosControl);
-			
-			registryMouseMove.dispatch(new GlfwMouseMoveEvent(this, delta, mousePos));
-		}));
-		glfwSetScrollCallback(handle, (window, xoffset, yoffset) -> {
-			if(window != handle) return;
-			registryMouseScroll.dispatch(new Vec2f((float)xoffset, (float)yoffset));
-		});
-		
-		title.dispatch(title.get());
-		
-		if(!isFullScreen()){
-			pos.dispatch(pos);
-			size.dispatch(size);
-			if(visible.get()) maximized.dispatch(maximized.get());
+		if(hasPositions()){
+			pos = getPointPtr(GLFW::glfwGetWindowPos);
 		}
-		cursorMode.dispatch(cursorMode.get());
-		focused.set(glfwGetWindowAttrib(handle, GLFW_FOCUSED) == GLFW_TRUE);
+		
+		maximized = glfwGetWindowAttrib(handle, GLFW_MAXIMIZED) == GLFW_TRUE;
+		iconified = glfwGetWindowAttrib(handle, GLFW_ICONIFIED) == GLFW_TRUE;
+		focused = glfwGetWindowAttrib(handle, GLFW_FOCUSED) == GLFW_TRUE;
+		
+		cursorPos = getPointD2IPtr(GLFW::glfwGetCursorPos);
+	}
+	
+	// Fuck you. I get it but still, fuck you
+	public static boolean hasPositions(){
+		return glfwGetPlatform() != GLFW_PLATFORM_WAYLAND;
+	}
+	
+	private static void hint(int prop, boolean val){
+		glfwWindowHint(prop, val? GLFW_TRUE : GLFW_FALSE);
+	}
+	
+	public boolean isCreated(){ return handle != NULL; }
+	public long getHandle()   { return handle; }
+	private void requireCreated(){
+		if(!isCreated()) throw new IllegalStateException("Window is not created");
+	}
+	
+	public void destroy(){
+		requireCreated();
+		
+		onDestroy.forEach(Runnable::run);
+		onDestroy.clear();
+		
+		GlfwCallbacks.free(handle);
+		glfwDestroyWindow(handle);
+		
+		handle = NULL;
+	}
+	
+	public void onDestroy(Runnable event){
+		onDestroy.add(event);
+	}
+	
+	//======== State ========//
+	
+	public String title(){ return title; }
+	/// Window content area size in screen coords
+	public Size size(){ return size; }
+	/// @return content area pos in screen coords, null if unknown (Wayland)
+	public Point pos(){ return pos; }
+	public boolean isMaximized() { return maximized; }
+	public boolean isIconified() { return iconified; }
+	public boolean isFocused()   { return focused; }
+	public boolean isFullScreen(){ return fullScreenMonitor != null; }
+	/// @return null if not full screen
+	public FullScreenStyle fullScreenStyle(){ return fullScreenMonitor != null? fullScreenStyle : null; }
+	public GlfwMonitor fullScreenMonitor(){ return fullScreenMonitor; }
+	public Cursor cursorMode()            { return cursorMode; }
+	public Point cursorPos()              { return cursorPos; }
+	
+	/**
+	 * Snapped to a screen edge, quadrant or snap layout. Only Windows reports this.<br/>
+	 * A snapped window is saved with the geometry it returns to when it is un-snapped
+	 */
+	public boolean isSnapped(){
+		if(!isCreated() || maximized || iconified || fullScreenMonitor != null) return false;
+		return glfwGetPlatform() == GLFW_PLATFORM_WIN32 && Win32Placement.isArranged(handle);
+	}
+	
+	public boolean isVisible(){
+		if(!isCreated()) return visibleOnCreate;
+		return glfwGetWindowAttrib(handle, GLFW_VISIBLE) == GLFW_TRUE;
+	}
+	/**
+	 * The onscreen part of the framebuffer, in framebuffer pixels with the origin at the top left.
+	 * This is the whole framebuffer, except under {@link #setBorderlessOversize(boolean) borderless oversize},
+	 * where the window extends one pixel past the monitor. <br/>
+	 * For example, when rendering with OpenGL, whose viewport origin is at the bottom left, account for this area with:
+	 * <pre>{@code
+	 * var a = window.visibleArea();
+	 * glViewport(a.x(), window.framebufferSize().height() - a.y() - a.height(), a.width(), a.height());
+	 * }</pre>
+	 */
+	public Area visibleArea(){
+		var fb      = framebufferSize();
+		var cover   = borderlessCover;
+		var monitor = fullScreenMonitor;
+		
+		if(cover == null || monitor == null || size.isEmpty()){
+			return new Area(0, 0, fb.width(), fb.height());
+		}
+		
+		double sx = fb.width()/(double)size.width(), sy = fb.height()/(double)size.height();
+		return new Area(
+			(int)Math.round(cover.visibleX()*sx), (int)Math.round(cover.visibleY()*sy),
+			(int)Math.round(monitor.bounds.width*sx), (int)Math.round(monitor.bounds.height*sy)
+		);
+	}
+	
+	/**
+	 * Get size from GLFW, can differ from {@link #size()} on high DPI displays.
+	 */
+	public Size framebufferSize(){
+		requireCreated();
+		return getSizePtr(GLFW::glfwGetFramebufferSize);
 	}
 	
 	public boolean isKeyDown(int key){
 		requireCreated();
 		return glfwGetKey(handle, key) == GLFW_PRESS;
 	}
-	
-	public boolean isMouseKeyDown(int key){
+	public boolean isMouseButtonDown(int button){
 		requireCreated();
-		return glfwGetMouseButton(handle, key) == GLFW_PRESS;
+		return glfwGetMouseButton(handle, button) == GLFW_PRESS;
+	}
+	public boolean shouldClose(){
+		if(!isCreated()){
+			return true;
+		}
+		return glfwWindowShouldClose(handle);
 	}
 	
-	public GlfwWindow setUserPointer(@NotNull PointerBuffer pointer){
-		return setUserPointer(pointer.address());
+	//======== Requests ========//
+	
+	public void setTitle(String title){
+		this.title = Objects.requireNonNull(title);
+		if(isCreated()){
+			glfwSetWindowTitle(handle, title);
+		}
+	}
+	public void setSize(int width, int height){
+		if(isCreated()){
+			glfwSetWindowSize(handle, width, height);
+			syncFromGlfw();
+		}else{
+			size = new Size(width, height);
+		}
 	}
 	
-	public GlfwWindow setUserPointer(long pointer){
+	/// May be ignored on Wayland
+	public void setPos(int x, int y){
+		if(isCreated()){
+			if(!isVisible()) placeOnShow = new Point(x, y);
+			if(hasPositions()) glfwSetWindowPos(handle, x, y);
+			syncFromGlfw();
+		}else pos = new Point(x, y);
+	}
+	
+	public void show(){
+		if(!isCreated()){
+			visibleOnCreate = true;
+			return;
+		}
+		
+		boolean max = maximizeOnShow;
+		maximizeOnShow = false;
+		
+		if(max && glfwGetPlatform() == GLFW_PLATFORM_WIN32){
+			Win32Placement.showMaximized(handle);
+		}else{
+			glfwShowWindow(handle);
+			correctPlacement();
+			if(max) glfwMaximizeWindow(handle);
+		}
+		
+		var fullScreen = fullScreenOnShow;
+		fullScreenOnShow = null;
+		
+		if(fullScreen != null){
+			setFullScreen(fullScreen, fullScreenStyle);
+		}
+		syncFromGlfw();
+	}
+	
+	public void hide(){
+		if(isCreated()){
+			glfwHideWindow(handle);
+		}else{
+			visibleOnCreate = false;
+		}
+	}
+	
+	public void maximize(){
+		if(!isCreated()){
+			maximized = true;
+			return;
+		}
+		if(maximizesOnShow() && !isVisible()){
+			maximizeOnShow = true;
+			return;
+		}
+		glfwMaximizeWindow(handle);
+		syncFromGlfw();
+	}
+	
+	public void iconify(){
 		requireCreated();
-		glfwSetWindowUserPointer(handle, pointer);
-		return this;
+		glfwIconifyWindow(handle);
+		syncFromGlfw();
 	}
 	
-	public long getUserPointer(){
-		return glfwGetWindowUserPointer(handle);
+	/// Exit maximized or minimized state
+	public void restore(){
+		if(isCreated()){
+			maximizeOnShow = false;
+			glfwRestoreWindow(handle);
+			syncFromGlfw();
+		}else maximized = false;
+	}
+	
+	public void focus(){
+		requireCreated();
+		glfwFocusWindow(handle);
+	}
+	
+	public void requestClose(){
+		requireCreated();
+		glfwSetWindowShouldClose(handle, true);
+	}
+	
+	/**
+	 * Full screen in the {@link #setFullScreenStyle default style}.
+	 *
+	 * @param monitor monitor to cover. Null means to exit full screen
+	 */
+	public void setFullScreen(GlfwMonitor monitor){
+		setFullScreen(monitor, defaultFullScreenStyle);
+	}
+	/**
+	 * @param monitor monitor to cover. Null means to exit full screen
+	 */
+	public void setFullScreen(GlfwMonitor monitor, FullScreenStyle style){
+		Objects.requireNonNull(style);
+		if(!isCreated()){
+			fullScreenMonitor = monitor;
+			fullScreenStyle = style;
+			return;
+		}
+		if(Objects.equals(monitor, fullScreenMonitor) && (monitor == null || style == fullScreenStyle)){
+			return;
+		}
+		
+		boolean wasFullScreen = fullScreenMonitor != null;
+		if(wasFullScreen && monitor != null && monitor.equals(fullScreenMonitor) && usesBorderless(style) == usesBorderless(fullScreenStyle)){
+			// Both styles are the same full screen on this platform.
+			fullScreenStyle = style;
+			placementChanged();
+			return;
+		}
+		
+		if(wasFullScreen){
+			leaveFullScreen(monitor == null);
+		}
+		
+		if(monitor != null){
+			if(!wasFullScreen){
+				maximizedBeforeFullScreen = maximized;
+				// Windows and Wayland keep the maximized flag set during full screen, so a later maximize is ignored and Windows loses
+				// the restore geometry. X11 window managers handle this themselves
+				if(maximized && glfwGetPlatform() != GLFW_PLATFORM_X11) glfwRestoreWindow(handle);
+			}
+			
+			fullScreenMonitor = monitor;
+			fullScreenStyle = style;
+			
+			var b = monitor.bounds;
+			if(usesBorderless(style)){
+				decoratedBeforeFullScreen = glfwGetWindowAttrib(handle, GLFW_DECORATED) == GLFW_TRUE;
+				glfwSetWindowAttrib(handle, GLFW_DECORATED, GLFW_FALSE);
+				applyBorderlessCover();
+			}else{
+				glfwSetWindowMonitor(handle, monitor.handle, b.x, b.y, b.width, b.height, monitor.refreshRate);
+			}
+		}
+		placementChanged();
+		syncFromGlfw();
+	}
+	
+	/**
+	 * @param restoreMaximized false when switching straight to another full screen
+	 */
+	private void leaveFullScreen(boolean restoreMaximized){
+		var style = fullScreenStyle;
+		fullScreenMonitor = null;
+		
+		borderlessCover = null;
+		
+		var p = normalPos != null? normalPos : new Point(0, 0);
+		var s = normalSize != null? normalSize : size;
+		
+		if(usesBorderless(style)){
+			glfwSetWindowAttrib(handle, GLFW_DECORATED, decoratedBeforeFullScreen? GLFW_TRUE : GLFW_FALSE);
+			glfwSetWindowSize(handle, s.width(), s.height());
+			glfwSetWindowPos(handle, p.x(), p.y());
+		}else{
+			glfwSetWindowMonitor(handle, NULL, p.x(), p.y(), s.width(), s.height(), GLFW_DONT_CARE);
+		}
+		
+		if(restoreMaximized && maximizedBeforeFullScreen && glfwGetPlatform() != GLFW_PLATFORM_X11) glfwMaximizeWindow(handle);
+	}
+	
+	private void applyBorderlessCover(){
+		var monitor = fullScreenMonitor;
+		var b       = monitor.bounds;
+		var cover   = borderlessOversize? BorderlessCover.of(monitor) : new BorderlessCover(b.x, b.y, b.width, b.height, 0, 0);
+		borderlessCover = cover;
+		glfwSetWindowPos(handle, cover.x(), cover.y());
+		glfwSetWindowSize(handle, cover.width(), cover.height());
+	}
+	
+	/**
+	 * Some GPU drivers switch a window that exactly covers a monitor into exclusive full screen, which changes the
+	 * display mode just like {@link FullScreenStyle#EXCLUSIVE} would. With this on, a
+	 * {@link FullScreenStyle#BORDERLESS borderless} window on Windows is a pixel larger than its monitor instead,
+	 * past an edge with no other monitor beyond it. Render into {@link #visibleArea()} to keep that pixel off screen.
+	 * Has no effect elsewhere, other platforms do not switch display modes for full screen.
+	 */
+	public void setBorderlessOversize(boolean oversize){
+		if(borderlessOversize == oversize) return;
+		borderlessOversize = oversize;
+		if(isCreated() && borderlessCover != null){
+			applyBorderlessCover();
+			placementChanged();
+			syncFromGlfw();
+		}
+	}
+	public boolean borderlessOversize(){ return borderlessOversize; }
+	
+	private static boolean usesBorderless(FullScreenStyle style){
+		return style == FullScreenStyle.BORDERLESS && glfwGetPlatform() == GLFW_PLATFORM_WIN32;
+	}
+	
+	/**
+	 * The style {@link #setFullScreen(GlfwMonitor)} and {@link #toggleFullScreen()} use. Switches a window that is
+	 * already full screen over to it.
+	 */
+	public void setFullScreenStyle(FullScreenStyle style){
+		defaultFullScreenStyle = Objects.requireNonNull(style);
+		if(isCreated() && fullScreenMonitor != null && fullScreenStyle != style) setFullScreen(fullScreenMonitor, style);
+	}
+	public FullScreenStyle defaultFullScreenStyle(){ return defaultFullScreenStyle; }
+	
+	public void toggleFullScreen(){
+		setFullScreen(isFullScreen()? null : bestMonitor());
+	}
+	
+	public Registration autoF11Toggle(){
+		return onKey(GLFW_KEY_F11, GlfwKeyboardEvent.Type.DOWN, e -> toggleFullScreen());
+	}
+	
+	public void setCursorMode(Cursor mode){
+		cursorMode = Objects.requireNonNull(mode);
+		if(isCreated()) glfwSetInputMode(handle, GLFW_CURSOR, mode.flag);
+	}
+	
+	public void setCursorPos(double x, double y){
+		requireCreated();
+		glfwSetCursorPos(handle, x, y);
+	}
+	public void centerMouse(){
+		setCursorPos(size.width()/2D, size.height()/2D);
+	}
+	
+	public void centerWindow(){
+		var m = bestMonitor();
+		if(m == null) return;
+		setPos((int)m.bounds.getCenterX() - size.width()/2, (int)m.bounds.getCenterY() - size.height()/2);
+	}
+	
+	/**
+	 * @return find a monitor that best fits the window
+	 */
+	public GlfwMonitor bestMonitor(){
+		Rectangle2D.Float rect = pos != null? new Rectangle2D.Float(pos.x(), pos.y(), size.width(), size.height()) : null;
+		return GlfwMonitor.bestMonitor(rect);
 	}
 	
 	public void setIcon(BufferedImage... images){
@@ -513,10 +928,9 @@ public class GlfwWindow{
 		}
 		setIcon(gImages);
 	}
-	
 	public void setIcon(GLFWImage... images){
+		requireCreated();
 		if(images.length == 0) return;
-		
 		try(final GLFWImage.Buffer iconSet = GLFWImage.malloc(images.length)){
 			for(int i = images.length - 1; i>=0; i--){
 				iconSet.put(i, images[i]);
@@ -525,408 +939,260 @@ public class GlfwWindow{
 		}
 	}
 	
-	public boolean isCreated(){
-		return handle != NULL;
+	public void setUserPointer(PointerBuffer pointer){
+		setUserPointer(pointer.address());
 	}
-	
-	public void pollEvents(){
-		glfwPollEvents();
-	}
-	
-	public void waitEvents(){
-		glfwWaitEvents();
-	}
-	
-	public boolean shouldClose(){
-		if(!isCreated()) return true;
-		return glfwWindowShouldClose(handle);
-	}
-	
-	
-	public void destroy(){
+	public void setUserPointer(long pointer){
 		requireCreated();
-		onDestroy.forEach(Runnable::run);
-		onDestroy.clear();
-		glfwDestroyWindow(handle);
-		handle = NULL;
+		glfwSetWindowUserPointer(handle, pointer);
+	}
+	public long getUserPointer(){
+		requireCreated();
+		return glfwGetWindowUserPointer(handle);
 	}
 	
-	
-	public void hide(){
-		visible.set(false);
+	public void makeContextCurrent(){
+		requireCreated();
+		glfwMakeContextCurrent(handle);
 	}
-	
-	public void show(){
-		visible.set(true);
-	}
-	
-	public boolean isVisible(){
-		return visible.get() && size.x() != 0 && size.y() != 0;
-	}
-	
 	public void swapBuffers(){
 		requireCreated();
 		glfwSwapBuffers(handle);
 	}
 	
-	//=======SAVE=======//
+	//======== Event loop ========//
 	
+	public void pollEvents(){ glfwPollEvents(); }
+	public void waitEvents(){ glfwWaitEvents(); }
 	
-	@SuppressWarnings("unchecked")
-	public GlfwWindow loadState(String data){
-		return loadState(new Gson().fromJson(data, HashMap.class));
-	}
-	
-	public GlfwWindow loadState(File file){
-		if(file.length() == 0) return this;
-		
-		try(Reader data = new BufferedReader(new FileReader(file))){
-			return loadState(data);
-		}catch(Exception ignored){ }
-		return this;
-	}
-	
-	@SuppressWarnings("unchecked")
-	public GlfwWindow loadState(Reader data){
-		return loadState(new Gson().fromJson(data, HashMap.class));
-	}
-	
-	@SuppressWarnings({"unchecked", "AutoBoxing", "rawtypes"})
-	public GlfwWindow loadState(Map<String, Map> data){
-		
-		boolean logProblems = UtilL.sysPropertyByClass(GlfwWindow.class, "logProblems", Boolean.FALSE, Boolean::valueOf);
-		
-		try{
-			IntBuffer target = ByteBuffer.wrap(TextUtil.hexStringToByteArray(((Map<String, ?>)data).get("target").toString()))
-			                             .order(ByteOrder.nativeOrder())
-			                             .asIntBuffer();
-			
-			Rectangle2D rect = new Rectangle2D.Float(target.get(), target.get(), target.get(), target.get());
-			
-			monitor.set(GlfwMonitor.getMonitors()
-			                       .stream()
-			                       .filter(m -> m.bounds.equals(rect))
-			                       .findAny()
-			                       .orElseGet(GlfwMonitor::getPrimaryMonitor));
-			size.set(monitor.get().bounds.width, monitor.get().bounds.height);
-			
-			try{
-				Map<String, Map<String, Number>> restore = data.get("restore");
-				
-				Map<String, Number> sizeD = restore.get("size"), posD = restore.get("location");
-				
-				restoreSize.set(sizeD.getOrDefault("width", size.x()).intValue(),
-				                sizeD.getOrDefault("height", size.y()).intValue());
-				restorePos.set(posD.getOrDefault("top", pos.x()).intValue(),
-				               posD.getOrDefault("left", pos.y()).intValue());
-			}catch(Throwable e){
-				if(logProblems) LogUtil.println(e);
-			}
-			
-			return this;
-		}catch(Throwable e){
-			if(logProblems) LogUtil.println(e);
+	public void whileOpen(Runnable run){
+		while(!shouldClose()){
+			run.run();
 		}
-		
-		try{
-			Map<String, Number> size = data.get("size");
-			this.size.set(size.getOrDefault("width", this.size.x()).intValue(),
-			              size.getOrDefault("height", this.size.y()).intValue());
-		}catch(Throwable e){
-			if(logProblems) LogUtil.println(e);
-		}
-		
-		try{
-			Map<String, Number> pos = data.get("location");
-			this.pos.set(pos.getOrDefault("top", this.pos.x()).intValue(),
-			             pos.getOrDefault("left", this.pos.y()).intValue());
-		}catch(Throwable e){
-			if(logProblems) LogUtil.println(e);
-		}
-		try{
-			maximized.set(Boolean.parseBoolean(data.get("max") + ""));
-		}catch(Throwable e){
-			e.printStackTrace();
-		}
-		
-		
-		return this;
 	}
-	
-	@NotNull
-	private Gson getG(){
-		return new GsonBuilder().setPrettyPrinting()
-		                        .disableHtmlEscaping()
-		                        .create();
-	}
-	
-	public synchronized GlfwWindow saveState(File file){
-		File tmp = new File(file.getPath() + "@");
-		try(Writer data = new BufferedWriter(new FileWriter(tmp))){
-			saveState(data);
-		}catch(Exception ignored){
-			return this;
-		}
-		
-		file.delete();
-		tmp.renameTo(file);
-		
-		return this;
-	}
-	
-	public GlfwWindow saveState(Writer out){
-		getG().toJson(saveState(new JsonObject()), out);
-		return this;
-	}
-	
-	public String saveState(){
-		return getG().toJson(saveState(new JsonObject()));
-	}
-	
-	@SuppressWarnings("AutoBoxing")
-	public JsonObject saveState(JsonObject json){
-		requireCreated();
-		
-		if(isFullScreen()){
-			ByteBuffer bytes = ByteBuffer.allocate(Integer.SIZE/Byte.SIZE*4).order(ByteOrder.nativeOrder());
-			
-			GlfwMonitor m = monitor.get();
-			bytes.putInt(m.bounds.x);
-			bytes.putInt(m.bounds.y);
-			bytes.putInt(m.bounds.width);
-			bytes.putInt(m.bounds.height);
-			
-			json.addProperty("target", TextUtil.bytesToHex(bytes.array()));
-			JsonObject restore = new JsonObject();
-			
-			JsonObject size = new JsonObject();
-			size.addProperty("width", restoreSize.x());
-			size.addProperty("height", restoreSize.y());
-			JsonObject location = new JsonObject();
-			location.addProperty("top", restorePos.x());
-			location.addProperty("left", restorePos.y());
-			
-			restore.add("size", size);
-			restore.add("location", location);
-			
-			json.add("restore", restore);
-		}else{
-			IVec2iR resSiz;
-			IVec2iR resPos;
-			boolean max;
-			boolean ico;
-			
-			final boolean visible = isVisible();
-			
-			if(!visible){
-				ico = iconified.get();
-				max = !ico && maximized.get();
-				
-				if(max) maximized.set(false);
-				if(ico) iconified.set(false);
-				
-				resSiz = this.size;
-				resPos = pos;
-			}else{
-				max = false;
-				ico = false;
-				if(restorePos.equals(0, 0)) restorePos.set(pos);
-				if(restoreSize.equals(0, 0)) restoreSize.set(size);
-				
-				if(maximized.get() || iconified.get()){
-					resSiz = restoreSize;
-					resPos = restorePos;
-				}else{
-					resSiz = this.size;
-					resPos = pos;
-				}
-			}
-			
-			JsonObject size = new JsonObject();
-			size.addProperty("width", resSiz.x());
-			size.addProperty("height", resSiz.y());
-			JsonObject location = new JsonObject();
-			location.addProperty("top", resPos.x());
-			location.addProperty("left", resPos.y());
-			
-			if(max) maximized.set(true);
-			if(ico) iconified.set(true);
-			
-			json.add("size", size);
-			json.add("location", location);
-			json.addProperty("max", maximized.get());
-		}
-		return json;
-	}
-	
-	public void setAutoFullScreen(){
-		
-		
-		monitor.set(getBestScreen());
-	}
-	
-	private GlfwMonitor getBestScreen(){
-		GlfwMonitor.init();
-		
-		pos.set(pos);
-		
-		Rectangle2D windowRect = new Rectangle2D.Float();
-		windowRect.setRect(pos.x(), pos.y(), size.x(), size.y());
-		
-		GlfwMonitor.moveToVisible(windowRect);
-		
-		GlfwMonitor best        = null;
-		double      bestOverlap = 0;
-		
-		for(GlfwMonitor monitor : GlfwMonitor.getMonitors()){
-			Rectangle2D overlapRect = windowRect.createIntersection(monitor.bounds);
-			double      overlap     = overlapRect.getWidth()*overlapRect.getHeight();
-			if(bestOverlap<overlap){
-				best = monitor;
-				bestOverlap = overlap;
-			}
-		}
-		
-		return best;
-	}
-	
-	public void requestClose(){
-		requireCreated();
-		glfwSetWindowShouldClose(handle, true);
-	}
-	
-	public boolean isFocused(){
-		return focused.get();
-	}
-	
-	public void focus(){
-		glfwFocusWindow(handle);
-	}
-	
-	public void toggleFullScreen(){
-		if(monitor.get() != null) monitor.set(null);
-		else setAutoFullScreen();
-	}
-	
-	public CompletableFuture<Void> whileOpen(@NotNull Runnable run, @NotNull String name){
+	public CompletableFuture<Void> whileOpen(Runnable run, String name){
 		return whileOpen(run, name, Thread::new);
 	}
-	
-	public CompletableFuture<Void> whileOpen(@NotNull Runnable run, @NotNull String name, @NotNull BiFunction<Runnable, String, Thread> newThread){
-		CompletableFuture<Void> future = new CompletableFuture<>();
+	public CompletableFuture<Void> whileOpen(Runnable run, String name, BiFunction<Runnable, String, Thread> newThread){
+		var future = new CompletableFuture<Void>();
 		newThread.apply(() -> {
 			whileOpen(run);
 			future.complete(null);
 		}, name).start();
 		return future;
 	}
-	
-	public void whileOpen(@NotNull Runnable run){
-		while(!this.shouldClose()){
-			run.run();
-		}
-	}
-	
-	public void centerMouse(){
-		mousePos.set(size.x()/2, size.y()/2);
-	}
-	
-	@Override
-	public String toString(){
-		return "GlfwWindowVk{" + title.get() + "}";
-	}
-	
-	public void useThisThread(){
-		requireCreated();
-		glfwMakeContextCurrent(handle);
-	}
-	
-	private void requireCreated(){
-		if(!isCreated()) throw new IllegalStateException();
-	}
-	
-	public void centerWindow(){
-		GlfwMonitor monitor = getBestScreen();
-		pos.set((int)monitor.bounds.getCenterX() - size.x()/2, (int)monitor.bounds.getCenterY() - size.y()/2);
-	}
-	
+	/**
+	 * Polls events until the window is asked to close, then hides it. Must run on the main thread.
+	 */
 	public void pollEventsWhileOpen(){
 		whileOpen(() -> {
-			sleep(0, 1000);
+			LockSupport.parkNanos(1_000_000);
 			pollEvents();
 		});
 		hide();
 	}
 	
-	public void autoHandleStateSaving(File saveFile){
-		autoHandleStateSaving(saveFile, 1000);
+	//======== Remembered placement ========//
+	
+	/**
+	 * @return how the window is placed, with the geometry to restore to when it is maximized, minimized or full screen
+	 */
+	public WindowState captureState(){
+		requireCreated();
+		var              fullScreenOn = fullScreenMonitor != null? fullScreenMonitor : fullScreenOnShow;
+		WindowState.Mode mode;
+		if(fullScreenOn != null){
+			mode = fullScreenStyle == FullScreenStyle.BORDERLESS? WindowState.Mode.BORDERLESS_FULL_SCREEN : WindowState.Mode.FULL_SCREEN;
+		}else{
+			mode = (maximized || maximizeOnShow || (iconified && maximizedBeforeIconify))? WindowState.Mode.MAXIMIZED : WindowState.Mode.NORMAL;
+		}
+		
+		Point p = normalPos;
+		Size  s = normalSize != null? normalSize : size;
+		if((maximized || iconified || isSnapped()) &&
+		   fullScreenMonitor == null &&
+		   glfwGetPlatform() == GLFW_PLATFORM_WIN32){
+			// Windows has the geometry it restores to so tracking can miss changes made while maximized
+			var restored = Win32Placement.read(handle);
+			if(restored != null){
+				p = restored.pos();
+				s = restored.size();
+				if(iconified){
+					mode = restored.restoreToMaximized()? WindowState.Mode.MAXIMIZED : WindowState.Mode.NORMAL;
+				}
+			}
+		}
+		if(p == null && hasPositions()) p = pos;
+		
+		return new WindowState(mode, hasPositions()? p : null, s, fullScreenOn != null? WindowState.MonitorRef.of(fullScreenOn) : null);
 	}
 	
-	public void autoHandleStateSaving(File saveFile, int timeoutInterval){
-		loadState(saveFile);
-		
-		class Runner extends Thread{
-			private       long lastChange = System.nanoTime();
-			private       long lastSave   = lastChange;
-			private final long timeoutIntervalNs;
-			
-			private Runner(long timeoutIntervalNs){
-				super("GlfwStateMonitor");
-				this.timeoutIntervalNs = timeoutIntervalNs;
+	/**
+	 * Before {@link #init} this sets how the window is created
+	 */
+	public void applyState(WindowState state){
+		Size  s = state.normalSize();
+		Point p = hasPositions()? state.normalPos() : null;
+		if(p != null){
+			var rect = new Rectangle2D.Double(p.x(), p.y(), s.width(), s.height());
+			if(GlfwMonitor.moveToVisible(rect)){
+				p = new Point((int)rect.getX(), (int)rect.getY());
+				s = new Size((int)rect.getWidth(), (int)rect.getHeight());
 			}
-			
-			@Override
-			public void run(){
-				UtilL.sleepWhile(() -> !isCreated());
-				whileOpen(() -> {
-					long lastChange = this.lastChange;
-					if(iconified.get() || lastChange == lastSave || System.nanoTime()<lastChange + timeoutIntervalNs){
-						UtilL.sleep(timeoutInterval);
-						return;
-					}
-					
-					this.lastSave = lastChange;
-					
-					saveState(saveFile);
-					UtilL.sleep(timeoutInterval);
-				});
+		}
+		var fullScreen = state.mode().isFullScreen();
+		var style      = state.mode() == WindowState.Mode.BORDERLESS_FULL_SCREEN? FullScreenStyle.BORDERLESS : FullScreenStyle.EXCLUSIVE;
+		var monitor    = fullScreen? state.monitor().find().orElse(null) : null;
+		var max        = state.mode() == WindowState.Mode.MAXIMIZED || fullScreen && monitor == null;
+		
+		if(!isCreated()){
+			size = s;
+			pos = p;
+			maximized = max;
+			fullScreenMonitor = monitor;
+			fullScreenStyle = style;
+			if(monitor != null) defaultFullScreenStyle = style;
+			maximizedBeforeFullScreen = false;
+			return;
+		}
+		
+		setFullScreen(null);
+		
+		if(maximized || iconified){
+			glfwRestoreWindow(handle);
+		}
+		
+		glfwSetWindowSize(handle, s.width(), s.height());
+		
+		if(p != null){
+			glfwSetWindowPos(handle, p.x(), p.y());
+		}
+		
+		normalSize = s;
+		normalPos = p;
+		
+		if(max) glfwMaximizeWindow(handle);
+		if(monitor != null){
+			defaultFullScreenStyle = style;
+			setFullScreen(monitor, style);
+		}
+		syncFromGlfw();
+	}
+	
+	/**
+	 * Restores the placement saved in the file path and keeps the file up to date. Saves when window idle and on exit
+	 */
+	public void autoSaveState(Path file){ autoSaveState(file, Duration.ofSeconds(1)); }
+	public void autoSaveState(Path file, Duration settleTime){
+		Objects.requireNonNull(file);
+		WindowState.load(file).ifPresent(this::applyState);
+		
+		var saver = new StateSaver(file, settleTime.toNanos());
+		var reg = onPlacementChange(() -> {
+			if(isCreated()){
+				saver.offer(captureState());
+			}
+		});
+		onDestroy(() -> {
+			reg.remove();
+			saver.finish(captureState());
+		});
+	}
+	
+	private static final class StateSaver{
+		
+		private final Path file;
+		
+		private final    long        settleNs;
+		private final    Thread      thread;
+		private volatile WindowState pending;
+		private volatile long        pendingAt;
+		
+		private WindowState saved;
+		
+		private volatile boolean done;
+		
+		StateSaver(Path file, long settleNs){
+			this.file = file;
+			this.settleNs = settleNs;
+			thread = new Thread(this::run, "GlfwWindowStateSaver");
+			thread.setDaemon(true);
+			thread.start();
+		}
+		
+		void offer(WindowState state){
+			pendingAt = System.nanoTime();
+			pending = state;
+			LockSupport.unpark(thread);
+		}
+		
+		private void run(){
+			while(!done){
+				var state = pending;
+				
+				if(state == null){
+					LockSupport.park(this);
+					continue;
+				}
+				
+				long wait = pendingAt + settleNs - System.nanoTime();
+				if(wait>0){
+					LockSupport.parkNanos(this, wait);
+					continue;
+				}
+				
+				if(pending == state){
+					pending = null;
+					write(state);
+				}
 			}
 		}
 		
-		Runner runner = new Runner(timeoutInterval*1000_000L);
-		runner.setDaemon(true);
-		runner.start();
+		private synchronized void write(WindowState state){
+			if(state.equals(saved)) return;
+			try{
+				state.save(file);
+				saved = state;
+			}catch(IOException e){
+				throw new UncheckedIOException("Failed to save window state to " + file, e);
+			}
+		}
 		
-		Runnable changeEvent = () -> {
-			runner.lastChange = System.nanoTime();
-			runner.interrupt();
-		};
-		
-		size.register(changeEvent);
-		pos.register(changeEvent);
-		monitor.register(m -> changeEvent.run());
-		onDestroy(() -> saveState(saveFile));
-		
+		void finish(WindowState last){
+			done = true;
+			pending = null;
+			LockSupport.unpark(thread);
+			write(last);
+		}
 	}
 	
-	public void autoF11Toggle(){
-		registryKeyboardKey.register(GLFW_KEY_F11, DOWN, e -> toggleFullScreen());
+	@Override
+	public String toString(){
+		return "GlfwWindow{" + title + "}";
 	}
 	
-	public long getHandle(){
-		return handle;
+	
+	private interface Int2PtrGet{
+		void get(long window, int[] a, int[] b);
 	}
 	
-	public void onDestroy(Runnable event){
-		onDestroy.add(event);
+	private interface Double2PtrGet{
+		void get(long window, double[] a, double[] b);
 	}
 	
-	public boolean isIconified(){
-		return iconified.get();
+	private Size getSizePtr(Int2PtrGet fn){
+		int[] w = {0}, h = {0};
+		fn.get(handle, w, h);
+		return new Size(w[0], h[0]);
 	}
-	
-	public void grabContext(){
-		requireCreated();
-		glfwMakeContextCurrent(handle);
+	private Point getPointPtr(Int2PtrGet fn){
+		int[] w = {0}, h = {0};
+		fn.get(handle, w, h);
+		return new Point(w[0], h[0]);
+	}
+	private Point getPointD2IPtr(Double2PtrGet fn){
+		double[] w = {0}, h = {0};
+		fn.get(handle, w, h);
+		return new Point((int)w[0], (int)h[0]);
 	}
 }
