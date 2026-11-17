@@ -107,9 +107,10 @@ public class GlfwWindow{
 		callbacks.windowPos.add((w, x, y) -> {
 			pos = new Point(x, y);
 			if(inNormalState()){
-				prevNormalPos = normalPos;
+				long now = System.nanoTime();
+				if(!isRecent(normalPosChangedNs, now)) prevNormalPos = normalPos;
 				normalPos = pos;
-				normalPosChangedNs = System.nanoTime();
+				normalPosChangedNs = now;
 			}
 			placementChanged();
 			syncModeFromGlfw();
@@ -119,9 +120,10 @@ public class GlfwWindow{
 			if(justUnmaximized()){
 				enforceNormalSize();
 			}else if(inNormalState() && !size.isEmpty()){
-				prevNormalSize = normalSize;
+				long now = System.nanoTime();
+				if(!isRecent(normalSizeChangedNs, now)) prevNormalSize = normalSize;
 				normalSize = size;
-				normalSizeChangedNs = System.nanoTime();
+				normalSizeChangedNs = now;
 			}
 			placementChanged();
 			syncModeFromGlfw();
@@ -239,11 +241,18 @@ public class GlfwWindow{
 		       glfwGetWindowAttrib(handle, GLFW_ICONIFIED) == GLFW_FALSE;
 	}
 	
-	/// The geometry reported just before maximizing was most likely already maximized geometry
+	/// Changes closer together than this are one burst, the prev values hold the geometry from before it.
+	private static final long NORMAL_BURST_NS = 100_000_000L;
+	private static boolean isRecent(long changedNs, long now){
+		return changedNs != 0 && now - changedNs<NORMAL_BURST_NS;
+	}
+	
+	/// The geometry reported just before maximizing was most likely already maximized geometry.
+	/// macOS animates zooming, reporting a whole burst of in-between sizes first.
 	private void undoRecentNormalChange(){
-		long recent = System.nanoTime() - 100_000_000L;
-		if(prevNormalSize != null && normalSizeChangedNs>recent && normalSize.equals(size)) normalSize = prevNormalSize;
-		if(prevNormalPos != null && normalPosChangedNs>recent && normalPos.equals(pos)) normalPos = prevNormalPos;
+		long now = System.nanoTime();
+		if(prevNormalSize != null && isRecent(normalSizeChangedNs, now) && normalSize.equals(size)) normalSize = prevNormalSize;
+		if(prevNormalPos != null && isRecent(normalPosChangedNs, now) && normalPos.equals(pos)) normalPos = prevNormalPos;
 	}
 	private void placementChanged(){
 		placementChanges.dispatch(Runnable::run);
@@ -461,7 +470,12 @@ public class GlfwWindow{
 		args.api.preInit();
 		
 		handle = glfwCreateWindow(size.width(), size.height(), title, NULL, NULL);
-		if(handle == NULL) throw new IllegalStateException("Failed to create window");
+		if(handle == NULL){
+			var desc  = BufferUtils.createPointerBuffer(1);
+			int code  = glfwGetError(desc);
+			var cause = code == GLFW_NO_ERROR? "" : ": " + desc.getStringUTF8(0);
+			throw new IllegalStateException("Failed to create window" + cause);
+		}
 		
 		if(args.api instanceof Initializer.VulkanSurfaceAPI){
 			glfwSetWindowSizeLimits(handle, 1, 1, GLFW_DONT_CARE, GLFW_DONT_CARE);

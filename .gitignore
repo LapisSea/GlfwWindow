@@ -7,3 +7,5 @@
 !/README.md
 !pom.xml
 !.editorconfig
+!/run-demo.sh
+!/run-demo.cmd

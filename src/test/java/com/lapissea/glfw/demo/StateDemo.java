@@ -40,6 +40,8 @@ public final class StateDemo{
 	private record Screen(List<String> left, List<String> right, List<String> footer){ }
 	
 	public static void main(String[] args) throws IOException{
+		// Java2D only draws into images here. A full AWT toolkit on macOS shares the main thread and OpenGL with GLFW.
+		System.setProperty("java.awt.headless", "true");
 		var  file    = Path.of("glfw-demo-state.json");
 		Path capture = null;
 		for(var arg : args){
