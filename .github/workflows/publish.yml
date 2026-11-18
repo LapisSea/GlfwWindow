@@ -1,0 +1,49 @@
+# Publishes to Maven Central when a GitHub release is published.
+# The release tag is the version: "2.0" or "v2.0" publishes 2.0, whatever the pom says.
+# Running it by hand (Actions > Publish to Maven Central > Run workflow) is a dry run: it builds and signs
+# with the real secrets, but uploads nothing.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   CENTRAL_USERNAME, CENTRAL_TOKEN  user token from central.sonatype.com > Account > Generate User Token
+#   GPG_PRIVATE_KEY                  gpg --armor --export-secret-keys <key id>
+#   GPG_PASSPHRASE                   passphrase of that key
+name: Publish to Maven Central
+
+on:
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          # Writes a settings.xml with the "central" server, credentials come from the env below
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_TOKEN
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+
+      - name: Set version from the release tag
+        if: github.event_name == 'release'
+        run: mvn -B -q versions:set -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
+
+      # Window tests need a display, they were run on real machines before releasing
+      - name: Publish
+        run: mvn -B ${{ github.event_name == 'release' && 'deploy' || 'verify' }} -DskipTests
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_TOKEN: ${{ secrets.CENTRAL_TOKEN }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Check the signatures
+        run: for f in target/*.asc; do gpg --verify "$f" "${f%.asc}"; done

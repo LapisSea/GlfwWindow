@@ -9,3 +9,4 @@
 !.editorconfig
 !/run-demo.sh
 !/run-demo.cmd
+!/.github/
