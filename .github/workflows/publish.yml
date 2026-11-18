@@ -18,7 +18,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # attaches the jars to the release
     steps:
       - uses: actions/checkout@v5
 
@@ -47,3 +47,9 @@ jobs:
 
       - name: Check the signatures
         run: for f in target/*.asc; do gpg --verify "$f" "${f%.asc}"; done
+
+      - name: Attach jars to the release
+        if: github.event_name == 'release'
+        run: gh release upload "${{ github.event.release.tag_name }}" target/*.jar target/*.jar.asc
+        env:
+          GH_TOKEN: ${{ github.token }}
